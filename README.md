@@ -19,9 +19,11 @@ cd ~/dotfiles
 ./bootstrap.sh
 ```
 
-`bootstrap.sh` installs the curated Homebrew packages, Oh My Zsh and its
-plugins, then runs `install.sh`. Open Neovim once afterward so lazy.nvim can
-install the pinned plugins.
+`bootstrap.sh` installs the curated Homebrew packages, the DejaVu Sans Mono
+Nerd Font, Oh My Zsh and its plugins, then runs `install.sh`. Open Neovim once
+afterward so lazy.nvim can install the pinned plugins. In iTerm2, select
+**DejaVuSansM Nerd Font Mono** under **Settings → Profiles → Text → Font** so
+Powerline and Neovim glyphs render correctly.
 
 If the repository is already cloned and dependencies are installed, only run:
 

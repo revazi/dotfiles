@@ -20,3 +20,6 @@ brew "rustup"
 brew "tmux"
 brew "tmuxp"
 brew "wget"
+
+# Patched glyphs used by the Agnoster prompt and Neovim.
+cask "font-dejavu-sans-mono-nerd-font"
