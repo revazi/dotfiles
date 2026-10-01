@@ -21,5 +21,6 @@ brew "tmux"
 brew "tmuxp"
 brew "wget"
 
-# Patched glyphs used by the Agnoster prompt and Neovim.
+# Terminal and patched glyphs used by the Agnoster prompt and Neovim.
+cask "iterm2"
 cask "font-dejavu-sans-mono-nerd-font"

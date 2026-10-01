@@ -1,7 +1,7 @@
 # Dotfiles
 
-Portable macOS shell, Git, tmux, Neovim, btop, and selected Pi settings.
-The installer uses ordinary symlinks—no dotfile manager required.
+Portable macOS shell, Git, tmux, Neovim, iTerm2, btop, and selected Pi
+settings. The installer uses ordinary symlinks—no dotfile manager required.
 
 ## New Mac
 
@@ -19,11 +19,11 @@ cd ~/dotfiles
 ./bootstrap.sh
 ```
 
-`bootstrap.sh` installs the curated Homebrew packages, the DejaVu Sans Mono
-Nerd Font, Oh My Zsh and its plugins, then runs `install.sh`. Open Neovim once
-afterward so lazy.nvim can install the pinned plugins. In iTerm2, select
-**DejaVuSansM Nerd Font Mono** under **Settings → Profiles → Text → Font** so
-Powerline and Neovim glyphs render correctly.
+`bootstrap.sh` installs the curated Homebrew packages, iTerm2, the DejaVu Sans
+Mono Nerd Font, Oh My Zsh and its plugins, then runs `install.sh`. It configures
+iTerm2 to load and save preferences from `config/iterm2`; restart iTerm2 after
+bootstrapping. Open Neovim once afterward so lazy.nvim can install the pinned
+plugins.
 
 If the repository is already cloned and dependencies are installed, only run:
 
@@ -61,3 +61,6 @@ git push
 
 Homebrew packages are intentionally curated in `Brewfile`; add tools there as
 needed instead of dumping every package installed on one machine.
+
+Quit iTerm2 before committing preference changes so it flushes them to
+`config/iterm2/com.googlecode.iterm2.plist`.

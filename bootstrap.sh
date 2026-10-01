@@ -40,6 +40,11 @@ clone_plugin https://github.com/zsh-users/zsh-autosuggestions zsh-autosuggestion
 clone_plugin https://github.com/zsh-users/zsh-syntax-highlighting zsh-syntax-highlighting
 clone_plugin https://github.com/darvid/zsh-poetry poetry
 
+# Tell iTerm2 to load and save preferences from the dotfiles checkout.
+# Quit iTerm2 before rerunning bootstrap if it is already open.
+defaults write com.googlecode.iterm2 PrefsCustomFolder -string "$DOTFILES/config/iterm2"
+defaults write com.googlecode.iterm2 LoadPrefsFromCustomFolder -bool true
+
 "$DOTFILES/install.sh"
 
-printf '\nBootstrap complete. Open Neovim once to install its plugins.\n'
+printf '\nBootstrap complete. Restart iTerm2, then open Neovim once to install its plugins.\n'
