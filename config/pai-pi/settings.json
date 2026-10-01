@@ -1,0 +1,18 @@
+{
+  "thinkingLevel": "high",
+  "theme": "dark",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.4",
+  "steeringMode": "one-at-a-time",
+  "followUpMode": "one-at-a-time",
+  "transport": "auto",
+  "enableSkillCommands": true,
+  "quietStartup": true,
+  "compaction": {
+    "enabled": true,
+    "proactive": true,
+    "contextThreshold": 0.85
+  },
+  "lastChangelogVersion": "0.74.2",
+  "defaultThinkingLevel": "high"
+}

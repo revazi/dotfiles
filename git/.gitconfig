@@ -1,0 +1,6 @@
+[user]
+	name = Revaz Zakalashvili
+	email = revaz.zakalashvili@gmail.com
+	signingKey = D724FE8608D520DB
+[credential]
+	helper = osxkeychain
