@@ -141,11 +141,18 @@ pathprepend $HOME/.local/bin
 # Prepend editorconfig-checker to PATH
 pathprepend /opt/homebrew/bin/editorconfig-checker
 
-if command -v brew >/dev/null 2>&1 && OPENSSL_PREFIX="$(brew --prefix openssl 2>/dev/null)"; then
-  export LDFLAGS="-L$OPENSSL_PREFIX/lib"
-  export CPPFLAGS="-I$OPENSSL_PREFIX/include"
-  export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig"
-  export PYTHON_CONFIGURE_OPTS="--enable-shared --with-openssl=$OPENSSL_PREFIX --enable-optimizations"
+# Help pyenv compile Python against Homebrew's keg-only libraries.
+if command -v brew >/dev/null 2>&1 && OPENSSL_PREFIX="$(brew --prefix openssl@3 2>/dev/null)"; then
+  READLINE_PREFIX="$(brew --prefix readline 2>/dev/null)"
+  SQLITE_PREFIX="$(brew --prefix sqlite3 2>/dev/null)"
+  XZ_PREFIX="$(brew --prefix xz 2>/dev/null)"
+  ZLIB_PREFIX="$(brew --prefix zlib 2>/dev/null)"
+
+  export PYTHON_BUILD_HOMEBREW_OPENSSL_FORMULA="openssl@3"
+  export LDFLAGS="-L$OPENSSL_PREFIX/lib -L$READLINE_PREFIX/lib -L$SQLITE_PREFIX/lib -L$XZ_PREFIX/lib -L$ZLIB_PREFIX/lib"
+  export CPPFLAGS="-I$OPENSSL_PREFIX/include -I$READLINE_PREFIX/include -I$SQLITE_PREFIX/include -I$XZ_PREFIX/include -I$ZLIB_PREFIX/include"
+  export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$READLINE_PREFIX/lib/pkgconfig:$SQLITE_PREFIX/lib/pkgconfig:$XZ_PREFIX/lib/pkgconfig:$ZLIB_PREFIX/lib/pkgconfig"
+  export PYTHON_CONFIGURE_OPTS="--enable-shared --with-openssl=$OPENSSL_PREFIX"
 fi
 
 export NVM_DIR="$HOME/.nvm"
