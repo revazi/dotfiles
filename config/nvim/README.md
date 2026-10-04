@@ -44,11 +44,10 @@ NeoVim configuration with custome keybinding.
 9. [williamboman/mason-lspconfig.nvim](https://github.com/williamboman/mason-lspconfig.nvim) - connection between lspconfig and mason
 10. [hrsh7th/cmp-nvim-lsp](https://github.com/hrsh7th/cmp-nvim-lsp) - nvim-cmp source for neovim's built-in language server client.
 11. [glepnir/lspsaga.nvim](https://github.com/glepnir/lspsaga.nvim) - A light-weight lsp plugin based on neovim's built-in lsp with a highly performant UI.
-12. [jose-elias-alvarez/typescript.nvim](https://github.com/jose-elias-alvarez/typescript.nvim) - additional functionality for typescript server (e.g. rename file & update imports)
-13. [onsails/lspkind.nvim](https://github.com/onsails/lspkind.nvim) - This tiny plugin adds vscode-like pictograms to neovim built-in lsp
-14. [jose-elias-alvarez/null-ls.nvim](https://github.com/jose-elias-alvarez/null-ls.nvim) - Use Neovim as a language server to inject LSP diagnostics, code actions, and more via Lua. - configuration for formatters & linters
-15. [jayp0521/mason-null-ls.nvim](https://github.com/jay-babu/mason-null-ls.nvim) - mason-null-ls bridges mason.nvim with the null-ls plugin - making it easier to use both plugins together.
-16. [tnvim-treesitter/nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) - The goal of nvim-treesitter is both to provide a simple and easy way to use the interface for tree-sitter in Neovim and to provide some basic functionality such as highlighting based on it.
+12. [onsails/lspkind.nvim](https://github.com/onsails/lspkind.nvim) - This tiny plugin adds vscode-like pictograms to neovim built-in lsp
+13. [nvimtools/none-ls.nvim](https://github.com/nvimtools/none-ls.nvim) - Use Neovim as a language server to inject LSP diagnostics, code actions, and more via Lua. - configuration for formatters & linters
+14. [jay-babu/mason-null-ls.nvim](https://github.com/jay-babu/mason-null-ls.nvim) - mason-null-ls bridges mason.nvim with none-ls - making it easier to use both plugins together.
+15. [nvim-treesitter/nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) - The goal of nvim-treesitter is both to provide a simple and easy way to use the interface for tree-sitter in Neovim and to provide some basic functionality such as highlighting based on it.
 
 ### Theme
 
@@ -60,13 +59,19 @@ NeoVim configuration with custome keybinding.
 
 ## Installation
 
-### Prerequisites for telescope
+### Prerequisites
 
-#### [fd](https://github.com/sharkdp/fd)
+#### [tree-sitter CLI](https://tree-sitter.github.io/tree-sitter/creating-parsers/1-getting-started.html#installation)
+
+Required by nvim-treesitter to install and update parsers:
+
+`brew install tree-sitter-cli`
+
+#### Telescope: [fd](https://github.com/sharkdp/fd)
 
 `brew install fd`
 
-#### [ripgrep](https://github.com/BurntSushi/ripgrep)
+#### Telescope: [ripgrep](https://github.com/BurntSushi/ripgrep)
 
 `brew install ripgrep`
 

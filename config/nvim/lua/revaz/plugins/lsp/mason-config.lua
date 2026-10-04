@@ -48,7 +48,12 @@ mason_null_ls.setup({
 		"stylua", -- lua formatter
 		"ruff",
 		"codespell", -- fix common misspellings
+		"djlint",
+		"editorconfig_checker",
+		"dotenv_linter",
+		"ansiblelint",
 	},
-	-- auto-install configured formatters & linters (with null-ls)
-	automatic_installation = true,
+	-- Install only the explicitly listed tools; code-action sources such as
+	-- gitsigns are not Mason packages.
+	automatic_installation = false,
 })
