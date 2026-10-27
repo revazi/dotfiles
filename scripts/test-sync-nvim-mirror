@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() {
+  printf 'test-sync-nvim-mirror: %s\n' "$*" >&2
+  exit 1
+}
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd -P)
+tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-sync-test.XXXXXX")
+trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+
+target="$tmp_dir/nvim-config-lua"
+mkdir -p "$target"
+git -C "$target" init -q
+git -C "$target" config user.name "Sync Test"
+git -C "$target" config user.email "sync-test@example.invalid"
+printf 'old init\n' >"$target/init.lua"
+printf 'stale\n' >"$target/stale.txt"
+printf 'target-only instructions\n' >"$target/AGENTS.md"
+git -C "$target" add .
+git -C "$target" commit -qm "Synthetic mirror baseline"
+git -C "$target" remote add origin https://example.invalid/revazi/nvim-config-lua.git
+
+if "$repo_root/scripts/sync-nvim-mirror" --dry-run "$target" >/dev/null 2>&1; then
+  fail "wrong origin was accepted"
+fi
+
+git -C "$target" remote set-url origin git@github.com:revazi/nvim-config-lua.git
+printf 'dirty\n' >"$target/untracked.txt"
+if "$repo_root/scripts/sync-nvim-mirror" --dry-run "$target" >/dev/null 2>&1; then
+  fail "dirty target was accepted"
+fi
+rm "$target/untracked.txt"
+
+"$repo_root/scripts/sync-nvim-mirror" --dry-run "$target" >/dev/null
+[[ $(cat "$target/init.lua") == "old init" ]] || fail "dry run changed a tracked file"
+[[ -f "$target/stale.txt" ]] || fail "dry run deleted a stale file"
+[[ $(cat "$target/AGENTS.md") == "target-only instructions" ]] || fail "dry run changed AGENTS.md"
+
+"$repo_root/scripts/sync-nvim-mirror" "$target" >/dev/null
+[[ -d "$target/.git" ]] || fail "target .git directory was removed"
+[[ ! -e "$target/stale.txt" ]] || fail "stale target file was not deleted"
+[[ $(cat "$target/AGENTS.md") == "target-only instructions" ]] || fail "target AGENTS.md was not preserved"
+diff -ru --exclude=.git --exclude=AGENTS.md "$repo_root/config/nvim" "$target" >/dev/null || fail "target content does not match canonical config"
+
+git -C "$target" rev-parse --git-dir >/dev/null
+printf 'sync-nvim-mirror tests passed\n'

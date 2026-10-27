@@ -10,26 +10,30 @@ return {
 	},
 	config = function()
 		local treesitter = require("nvim-treesitter")
-		local parsers = {
-			"bash",
-			"css",
-			"dockerfile",
-			"gitignore",
-			"graphql",
-			"html",
-			"javascript",
-			"json",
-			"lua",
-			"markdown",
-			"markdown_inline",
-			"python",
-			"rust",
-			"svelte",
-			"tsx",
-			"typescript",
-			"vim",
-			"yaml",
-		}
+		local install_dir = vim.fn.stdpath("data") .. "/site"
+		vim.opt.rtp:prepend(install_dir)
+
+		local parsers = vim.env.DOTFILES_NVIM_SMOKE == "1" and { "markdown", "markdown_inline" }
+			or {
+				"bash",
+				"css",
+				"dockerfile",
+				"gitignore",
+				"graphql",
+				"html",
+				"javascript",
+				"json",
+				"lua",
+				"markdown",
+				"markdown_inline",
+				"python",
+				"rust",
+				"svelte",
+				"tsx",
+				"typescript",
+				"vim",
+				"yaml",
+			}
 
 		treesitter.install(parsers)
 

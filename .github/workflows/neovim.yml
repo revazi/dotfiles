@@ -1,0 +1,71 @@
+name: Neovim
+
+on:
+  push:
+    paths:
+      - "config/nvim/**"
+      - "scripts/nvim-smoke.lua"
+      - "scripts/sync-nvim-mirror"
+      - "scripts/test-nvim"
+      - "scripts/test-sync-nvim-mirror"
+      - ".github/workflows/neovim.yml"
+  pull_request:
+    paths:
+      - "config/nvim/**"
+      - "scripts/nvim-smoke.lua"
+      - "scripts/sync-nvim-mirror"
+      - "scripts/test-nvim"
+      - "scripts/test-sync-nvim-mirror"
+      - ".github/workflows/neovim.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Neovim 0.12.0
+        uses: rhysd/action-setup-vim@v1
+        with:
+          version: v0.12.0
+          neovim: true
+
+      - name: Install tree-sitter CLI 0.27.0
+        run: npm install --global tree-sitter-cli@0.27.0
+
+      - name: Check shell scripts
+        run: |
+          bash -n scripts/sync-nvim-mirror scripts/test-nvim scripts/test-sync-nvim-mirror
+          shellcheck scripts/sync-nvim-mirror scripts/test-nvim scripts/test-sync-nvim-mirror
+
+      - name: Check Lua formatting
+        run: >-
+          npx --yes @johnnymorganz/stylua-bin@2.6.0 --check
+          config/nvim/lua/revaz/plugins-setup.lua
+          config/nvim/lua/revaz/plugins/treesitter.lua
+          config/nvim/lua/revaz/plugins/lsp.lua
+          config/nvim/lua/revaz/plugins/mason.lua
+          config/nvim/lua/revaz/plugins/lsp/mason-config.lua
+          scripts/nvim-smoke.lua
+
+      - name: Test mirror synchronization safeguards
+        run: scripts/test-sync-nvim-mirror
+
+      - name: Run isolated Neovim smoke tests
+        env:
+          NVIM_APPNAME: redirected
+          VIMINIT: 'lua error("inherited VIMINIT executed")'
+          EXINIT: 'lua error("inherited EXINIT executed")'
+          VIM: /definitely/not/neovim
+          VIMRUNTIME: /definitely/not/neovim
+        run: scripts/test-nvim

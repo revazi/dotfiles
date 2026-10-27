@@ -19,6 +19,11 @@ end
 -- enable mason
 mason.setup()
 
+-- Smoke tests verify the config and plugins without downloading unrelated tools.
+if vim.env.DOTFILES_NVIM_SMOKE == "1" then
+	return
+end
+
 mason_lspconfig.setup({
 	-- list of servers for mason to install
 	ensure_installed = {

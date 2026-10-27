@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/sync-nvim-mirror [--dry-run] TARGET
+
+Mirror the canonical config/nvim directory into a local clone of
+revazi/nvim-config-lua. TARGET must be the clean root of that repository.
+EOF
+}
+
+fail() {
+  printf 'sync-nvim-mirror: %s\n' "$*" >&2
+  exit 1
+}
+
+dry_run=false
+case "${1:-}" in
+  --dry-run)
+    dry_run=true
+    shift
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+[[ $# -eq 1 ]] || {
+  usage >&2
+  exit 2
+}
+
+for command in git rsync; do
+  command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
+done
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd -P)
+source_dir="$repo_root/config/nvim"
+target_arg=$1
+
+[[ -d "$source_dir" ]] || fail "canonical config not found: $source_dir"
+[[ -d "$target_arg" ]] || fail "target is not a directory: $target_arg"
+target_dir=$(CDPATH='' cd -- "$target_arg" && pwd -P)
+
+[[ "$target_dir" != "$source_dir" ]] || fail "source and target must be different directories"
+[[ -d "$target_dir/.git" || -f "$target_dir/.git" ]] || fail "target is not a Git working tree"
+
+git_root=$(git -C "$target_dir" rev-parse --show-toplevel 2>/dev/null) || fail "target is not a Git working tree"
+git_root=$(CDPATH='' cd -- "$git_root" && pwd -P)
+[[ "$git_root" == "$target_dir" ]] || fail "TARGET must be the repository root"
+
+origin=$(git -C "$target_dir" remote get-url origin 2>/dev/null) || fail "target has no origin remote"
+case "$origin" in
+  git@github.com:revazi/nvim-config-lua.git|\
+  ssh://git@github.com/revazi/nvim-config-lua.git|\
+  https://github.com/revazi/nvim-config-lua.git|\
+  https://github.com/revazi/nvim-config-lua)
+    ;;
+  *)
+    fail "target origin is not revazi/nvim-config-lua"
+    ;;
+esac
+
+if ! target_status=$(git -C "$target_dir" status --porcelain --untracked-files=all); then
+  fail "could not inspect the target worktree"
+fi
+if [[ -n "$target_status" ]]; then
+  fail "target has uncommitted changes; commit or clean it before synchronizing"
+fi
+
+rsync_args=(
+  --archive
+  --delete-after
+  --itemize-changes
+  --exclude=.git
+  --exclude=AGENTS.md
+)
+if $dry_run; then
+  rsync_args+=(--dry-run)
+  printf 'Dry run; no files will be changed.\n'
+fi
+
+rsync "${rsync_args[@]}" "$source_dir/" "$target_dir/"
+
+if $dry_run; then
+  printf 'Dry run complete.\n'
+else
+  printf 'Mirror updated locally. Review with: git -C %q status --short\n' "$target_dir"
+fi
