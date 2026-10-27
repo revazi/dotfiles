@@ -22,4 +22,8 @@ if not status_ok then
 	return
 end
 
-lazy.setup("revaz.plugins")
+lazy.setup("revaz.plugins", {
+	rocks = {
+		enabled = false,
+	},
+})

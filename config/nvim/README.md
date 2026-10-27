@@ -1,12 +1,31 @@
-# Nvim config
+# Neovim config
 
-NeoVim configuration with custome keybinding.
+This directory is the canonical Neovim configuration for `revazi/dotfiles`.
+The `revazi/nvim-config-lua` repository is a published mirror, not a second
+source of truth. Make changes here, verify them from the dotfiles repository,
+and use `scripts/sync-nvim-mirror` from the repository root to update a clean
+local mirror clone. The sync command excludes this directory's `AGENTS.md` and
+preserves the mirror clone's Git metadata.
+
+## Verification
+
+From the dotfiles repository root:
+
+```bash
+./scripts/test-nvim
+./scripts/sync-nvim-mirror --dry-run ../nvim-config-lua
+```
+
+The Neovim smoke test uses temporary `HOME` and XDG directories. It verifies
+lockfile-pinned plugins, startup, the removal of obsolete `typescript.nvim`
+configuration, Markdown Treesitter behavior around the 200 KiB limit, and
+relevant health checks without touching the normal Neovim installation.
 
 ## Plugins used
 
 ### Plugin manager
 
-1. wbthomason/packer.nvim - Packer
+1. folke/lazy.nvim - plugin manager
 2. nvim-lua/plenary.nvim - additional functions used in many plugins
 
 ### File explorer and icons

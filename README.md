@@ -64,3 +64,32 @@ needed instead of dumping every package installed on one machine.
 
 Quit iTerm2 before committing preference changes so it flushes them to
 `config/iterm2/com.googlecode.iterm2.plist`.
+
+## Neovim configuration
+
+`config/nvim` in this repository is the single source of truth. The separate
+[`revazi/nvim-config-lua`](https://github.com/revazi/nvim-config-lua) repository
+is a published mirror and must not be edited independently.
+
+To preview and then synchronize a clean local clone of the mirror:
+
+```bash
+./scripts/sync-nvim-mirror --dry-run ../nvim-config-lua
+./scripts/sync-nvim-mirror ../nvim-config-lua
+```
+
+The command validates the mirror's Git root and origin, refuses a dirty target,
+preserves its `.git` directory and any target-side `AGENTS.md`, deletes stale
+mirrored files, and never commits or pushes. Review the resulting target diff
+before publishing it.
+
+Run the isolated Neovim verification with:
+
+```bash
+./scripts/test-nvim
+```
+
+The test stages the canonical config under temporary XDG directories, installs
+only lockfile-pinned plugin revisions there, runs startup/Treesitter/health
+checks, and removes the temporary environment on exit. It does not read or
+modify the developer's existing Neovim data.

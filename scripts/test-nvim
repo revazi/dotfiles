@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() {
+  printf 'test-nvim: %s\n' "$*" >&2
+  exit 1
+}
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd -P)
+
+for command in git nvim tar tree-sitter; do
+  command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
+done
+
+tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-nvim-test.XXXXXX")
+tmp_dir=$(CDPATH='' cd -- "$tmp_dir" && pwd -P)
+cleanup() {
+  rm -rf "$tmp_dir" 2>/dev/null || rm -rf "$tmp_dir" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Do not let caller-specific Neovim startup settings redirect or replace the
+# staged canonical configuration. VIM and VIMRUNTIME must come from the tested
+# Neovim installation rather than the caller's environment.
+export NVIM_APPNAME=nvim
+unset VIMINIT EXINIT VIM VIMRUNTIME
+
+export HOME="$tmp_dir/home"
+export XDG_CONFIG_HOME="$tmp_dir/xdg/config"
+export XDG_DATA_HOME="$tmp_dir/xdg/data"
+export XDG_STATE_HOME="$tmp_dir/xdg/state"
+export XDG_CACHE_HOME="$tmp_dir/xdg/cache"
+export DOTFILES_NVIM_SMOKE=1
+export DOTFILES_NVIM_SOURCE="$repo_root/config/nvim"
+export GIT_TERMINAL_PROMPT=0
+
+mkdir -p "$HOME" "$XDG_CONFIG_HOME/nvim" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+tar -C "$repo_root/config/nvim" -cf - . | tar -C "$XDG_CONFIG_HOME/nvim" -xf -
+
+lazy_commit=$(
+  awk -F '"' '/"lazy.nvim"/ { for (i = 1; i <= NF; i++) if ($i == "commit") { print $(i + 2); exit } }' \
+    "$XDG_CONFIG_HOME/nvim/lazy-lock.json"
+)
+[[ "$lazy_commit" =~ ^[0-9a-f]{40}$ ]] || fail "could not read the lazy.nvim commit from lazy-lock.json"
+
+lazy_dir="$XDG_DATA_HOME/nvim/lazy/lazy.nvim"
+mkdir -p "$lazy_dir"
+git -C "$lazy_dir" init -q
+git -C "$lazy_dir" remote add origin https://github.com/folke/lazy.nvim.git
+git -C "$lazy_dir" fetch -q --depth=1 origin "$lazy_commit"
+git -C "$lazy_dir" checkout -q -B main FETCH_HEAD
+[[ $(git -C "$lazy_dir" rev-parse HEAD) == "$lazy_commit" ]] || fail "lazy.nvim checkout does not match lazy-lock.json"
+
+printf 'Running isolated Neovim smoke tests (temporary data: %s)\n' "$tmp_dir"
+log_file="$tmp_dir/neovim.log"
+if ! nvim --headless -c "lua dofile([[$repo_root/scripts/nvim-smoke.lua]])" >"$log_file" 2>&1; then
+  printf 'Neovim smoke test output (last 200 lines):\n' >&2
+  tail -n 200 "$log_file" >&2
+  exit 1
+fi
+
+grep -o 'Neovim smoke tests passed ([^)]*verified)' "$log_file" | tail -n 1
