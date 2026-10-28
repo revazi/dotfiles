@@ -9,6 +9,7 @@ return {
 		local methods = null_ls.methods
 		local helpers = require("null-ls.helpers")
 		local formatting = require("revaz.formatting")
+		local bigfile = require("revaz.bigfile")
 
 		local ruff_fmt = {
 			name = "ruff_fmt",
@@ -29,6 +30,9 @@ return {
 		}
 
 		null_ls.setup({
+			should_attach = function(bufnr)
+				return not bigfile.is_active(bufnr)
+			end,
 			sources = {
 				ruff_fmt,
 				null_ls.builtins.formatting.prettier.with({

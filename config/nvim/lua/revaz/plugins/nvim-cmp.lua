@@ -14,12 +14,19 @@ return {
 		local cmp = require("cmp")
 		local luasnip = require("luasnip")
 		local lspkind = require("lspkind")
+		local bigfile = require("revaz.bigfile")
 
 		require("luasnip.loaders.from_vscode").lazy_load()
 
 		vim.opt.completeopt = "menu,menuone,noselect"
 
 		cmp.setup({
+			enabled = function()
+				return not bigfile.is_active(0)
+					and vim.bo.buftype ~= "prompt"
+					and vim.fn.reg_recording() == ""
+					and vim.fn.reg_executing() == ""
+			end,
 			snippet = {
 				expand = function(args)
 					luasnip.lsp_expand(args.body)

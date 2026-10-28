@@ -51,7 +51,9 @@ jobs:
       - name: Check Lua formatting
         run: >-
           npx --yes @johnnymorganz/stylua-bin@2.6.0 --check
+          config/nvim/init.lua
           config/nvim/lua/revaz/plugins-setup.lua
+          config/nvim/lua/revaz/bigfile.lua
           config/nvim/lua/revaz/plugins/treesitter.lua
           config/nvim/lua/revaz/core/filetypes.lua
           config/nvim/lua/revaz/formatting.lua
@@ -59,6 +61,8 @@ jobs:
           config/nvim/lua/revaz/plugins/lspconfig.lua
           config/nvim/lua/revaz/plugins/mason.lua
           config/nvim/lua/revaz/plugins/none-ls.lua
+          config/nvim/lua/revaz/plugins/nvim-cmp.lua
+          config/nvim/lua/revaz/plugins/gitsigns.lua
           scripts/nvim-smoke.lua
 
       - name: Test mirror synchronization safeguards

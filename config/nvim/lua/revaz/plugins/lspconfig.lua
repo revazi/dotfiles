@@ -8,6 +8,7 @@ return {
 		local cmp_nvim_lsp = require("cmp_nvim_lsp")
 		local formatting = require("revaz.formatting")
 		local server_inventory = require("revaz.lsp.servers")
+		local bigfile = require("revaz.bigfile")
 		local keymap = vim.keymap
 
 		local on_attach = function(client, bufnr)
@@ -70,6 +71,22 @@ return {
 			config.capabilities = capabilities
 			config.on_attach = on_attach
 			vim.lsp.config(name, config)
+
+			-- Wrap the fully merged resolver so normal buffers retain nvim-lspconfig's
+			-- project-root behavior unless the inventory intentionally overrides it.
+			local root_dir = vim.lsp.config[name].root_dir
+			vim.lsp.config(name, {
+				root_dir = function(bufnr, on_dir)
+					if bigfile.is_active(bufnr) then
+						return
+					end
+					if type(root_dir) == "function" then
+						root_dir(bufnr, on_dir)
+					else
+						on_dir(root_dir)
+					end
+				end,
+			})
 		end
 
 		-- Native Neovim LSP configuration is the only server activation path.

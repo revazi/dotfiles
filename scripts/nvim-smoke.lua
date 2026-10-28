@@ -20,6 +20,20 @@ local function read_file(path)
 	return contents
 end
 
+local function write_bytes(path, size, prefix)
+	prefix = prefix or ""
+	if #prefix > size then
+		fail(("fixture prefix is larger than requested size for %s"):format(path))
+	end
+	local file, err = io.open(path, "wb")
+	if not file then
+		fail(("could not write %s: %s"):format(path, err))
+	end
+	file:write(prefix)
+	file:write(string.rep(" ", size - #prefix))
+	file:close()
+end
+
 local function git_head(path)
 	local output = vim.fn.system({ "git", "-C", path, "rev-parse", "HEAD" })
 	if vim.v.shell_error ~= 0 then
@@ -446,31 +460,364 @@ local function assert_locked_plugins()
 	return locked_count
 end
 
-local function assert_markdown_treesitter()
-	local install = require("nvim-treesitter").install({ "markdown", "markdown_inline" })
+local function assert_bigfile_mode()
+	local bigfile = require("revaz.bigfile")
+	assert_equal(bigfile.thresholds.markdown, 200 * 1024, "Markdown large-file threshold")
+	assert_equal(bigfile.thresholds.general, 1024 * 1024, "general large-file threshold")
+
+	local install = require("nvim-treesitter").install({ "lua", "markdown", "markdown_inline" })
 	install:wait(120000)
 
-	local state_dir = vim.fn.stdpath("state") .. "/smoke"
+	local state_dir = vim.fn.stdpath("state") .. "/bigfile-smoke"
 	vim.fn.mkdir(state_dir, "p")
-	local small_path = state_dir .. "/small.md"
-	local large_path = state_dir .. "/large.md"
-	vim.fn.writefile({ "# Small Markdown", "", "Treesitter should parse *this* file." }, small_path)
-	vim.fn.writefile({ string.rep("Large Markdown content.\n", 12000) }, large_path)
-
-	vim.cmd.edit(vim.fn.fnameescape(small_path))
-	local small_buf = vim.api.nvim_get_current_buf()
-	assert_equal(vim.bo[small_buf].filetype, "markdown", "small fixture filetype")
-	if not vim.wait(5000, function()
-		return vim.treesitter.highlighter.active[small_buf] ~= nil
-	end, 50) then
-		fail("Treesitter did not activate for a small Markdown file")
+	local fixtures = {
+		markdown_below = { path = state_dir .. "/markdown-below.md", size = bigfile.thresholds.markdown - 1 },
+		markdown_exact = { path = state_dir .. "/markdown-exact.md", size = bigfile.thresholds.markdown },
+		markdown_above = { path = state_dir .. "/markdown-above.md", size = bigfile.thresholds.markdown + 1 },
+		general_below = { path = state_dir .. "/general-below.lua", size = bigfile.thresholds.general - 1 },
+		general_exact = { path = state_dir .. "/general-exact.lua", size = bigfile.thresholds.general },
+		general_above = { path = state_dir .. "/general-above.lua", size = bigfile.thresholds.general + 1 },
+	}
+	for name, fixture in pairs(fixtures) do
+		local prefix = name:find("markdown", 1, true) and "# fixture\n" or "-- fixture\n"
+		write_bytes(fixture.path, fixture.size, prefix)
 	end
 
-	vim.cmd.edit(vim.fn.fnameescape(large_path))
-	local large_buf = vim.api.nvim_get_current_buf()
-	assert_equal(vim.bo[large_buf].filetype, "markdown", "large fixture filetype")
-	if vim.treesitter.highlighter.active[large_buf] ~= nil then
-		fail("Treesitter remained active for Markdown larger than 200 KiB")
+	local function edit(fixture)
+		vim.cmd.edit(vim.fn.fnameescape(fixture.path))
+		fixture.bufnr = vim.api.nvim_get_current_buf()
+		return fixture.bufnr
+	end
+
+	local function assert_state(fixture, expected, threshold_name, message)
+		local bufnr = edit(fixture)
+		assert_equal(vim.b[bufnr].bigfile, expected, message .. " active state")
+		assert_equal(vim.b[bufnr].bigfile_size, fixture.size, message .. " byte size")
+		assert_equal(vim.b[bufnr].bigfile_threshold, bigfile.thresholds[threshold_name], message .. " threshold")
+		assert_equal(vim.b[bufnr].bigfile_threshold_name, threshold_name, message .. " threshold name")
+		assert_equal(vim.b[bufnr].bigfile_override, "auto", message .. " automatic override state")
+		local comparison = expected and "exceeds" or "is at or below"
+		assert_equal(
+			vim.b[bufnr].bigfile_reason,
+			("size %d bytes %s %s threshold %d bytes"):format(
+				fixture.size,
+				comparison,
+				threshold_name,
+				bigfile.thresholds[threshold_name]
+			),
+			message .. " reason"
+		)
+		return bufnr
+	end
+
+	assert_state(fixtures.markdown_below, false, "markdown", "Markdown below boundary")
+	local markdown_exact = assert_state(fixtures.markdown_exact, false, "markdown", "Markdown exact boundary")
+	local markdown_above = assert_state(fixtures.markdown_above, true, "markdown", "Markdown above boundary")
+	assert_state(fixtures.general_below, false, "general", "general below boundary")
+	local general_exact = assert_state(fixtures.general_exact, false, "general", "general exact boundary")
+	local general_above = assert_state(fixtures.general_above, true, "general", "general above boundary")
+
+	assert_equal(vim.bo[markdown_exact].filetype, "markdown", "Markdown fixture filetype")
+	assert_equal(vim.bo[general_exact].filetype, "lua", "generic fixture filetype")
+	for _, normal_bufnr in ipairs({ markdown_exact, general_exact }) do
+		assert_equal(vim.diagnostic.is_enabled({ bufnr = normal_bufnr }), true, "normal-buffer diagnostics")
+		if
+			not vim.wait(5000, function()
+				return vim.treesitter.highlighter.active[normal_bufnr] ~= nil
+			end, 50)
+		then
+			fail("Treesitter did not activate at a normal-size threshold boundary")
+		end
+	end
+	for _, large_bufnr in ipairs({ markdown_above, general_above }) do
+		if vim.treesitter.highlighter.active[large_bufnr] ~= nil then
+			fail("Treesitter activated for a large-file buffer")
+		end
+		assert_equal(vim.diagnostic.is_enabled({ bufnr = large_bufnr }), false, "large-file diagnostics")
+		assert_equal(#vim.lsp.get_clients({ bufnr = large_bufnr }), 0, "large-file LSP clients")
+	end
+
+	local post_modeline_autocmds = vim.api.nvim_get_autocmds({
+		group = "RevazBigFile",
+		event = "BufWinEnter",
+	})
+	assert_equal(#post_modeline_autocmds, 1, "post-modeline large-file reevaluation")
+
+	local modeline_path = state_dir .. "/modeline-markdown.lua"
+	local modeline_size = bigfile.thresholds.markdown + 1
+	write_bytes(modeline_path, modeline_size, "-- vim: set ft=markdown :\n")
+	vim.cmd.edit(vim.fn.fnameescape(modeline_path))
+	local modeline_bufnr = vim.api.nvim_get_current_buf()
+	assert_equal(vim.bo[modeline_bufnr].filetype, "markdown", "modeline final filetype")
+	assert_equal(vim.b[modeline_bufnr].bigfile, true, "modeline Markdown large-file state")
+	assert_equal(vim.b[modeline_bufnr].bigfile_threshold_name, "markdown", "modeline Markdown threshold")
+	assert_equal(vim.b[modeline_bufnr].bigfile_size, modeline_size, "modeline Markdown byte size")
+	assert_equal(vim.treesitter.highlighter.active[modeline_bufnr], nil, "modeline large-file Treesitter prevention")
+	assert_equal(
+		vim.diagnostic.is_enabled({ bufnr = modeline_bufnr }),
+		false,
+		"modeline large-file diagnostics prevention"
+	)
+
+	local unnamed = vim.api.nvim_create_buf(false, true)
+	bigfile.evaluate(unnamed)
+	assert_equal(vim.b[unnamed].bigfile, false, "unnamed buffer active state")
+	assert_equal(vim.b[unnamed].bigfile_reason, "unnamed buffer", "unnamed buffer reason")
+	assert_equal(vim.b[unnamed].bigfile_size, -1, "unnamed buffer byte size")
+	vim.api.nvim_buf_delete(unnamed, { force = true })
+
+	local new_path = state_dir .. "/new-file.lua"
+	vim.cmd.edit(vim.fn.fnameescape(new_path))
+	local new_bufnr = vim.api.nvim_get_current_buf()
+	assert_equal(vim.b[new_bufnr].bigfile, false, "new file active state")
+	assert_equal(vim.b[new_bufnr].bigfile_reason, "file is not on disk", "new file reason")
+
+	local lsp_root_dir = state_dir .. "/lsp-roots"
+	local deno_dir = lsp_root_dir .. "/deno"
+	vim.fn.mkdir(deno_dir, "p")
+	vim.fn.writefile({ "{}" }, lsp_root_dir .. "/package-lock.json")
+	vim.fn.writefile({ "module.exports = {}" }, lsp_root_dir .. "/tailwind.config.js")
+	vim.fn.writefile({ "export const fixture = true" }, lsp_root_dir .. "/fixture.ts")
+	vim.fn.writefile({ "{}" }, deno_dir .. "/deno.json")
+	vim.fn.writefile({ "export const denoFixture = true" }, deno_dir .. "/fixture.ts")
+
+	local function named_buffer(path, filetype)
+		local bufnr = vim.api.nvim_create_buf(false, false)
+		vim.api.nvim_buf_set_name(bufnr, path)
+		vim.bo[bufnr].filetype = filetype
+		bigfile.evaluate(bufnr)
+		return bufnr
+	end
+
+	local project_bufnr = named_buffer(lsp_root_dir .. "/fixture.ts", "typescript")
+	local tailwind_root
+	vim.lsp.config.tailwindcss.root_dir(project_bufnr, function(root)
+		tailwind_root = root
+	end)
+	assert_equal(tailwind_root, lsp_root_dir, "Tailwind keeps nvim-lspconfig root resolution")
+
+	local ts_root
+	vim.lsp.config.ts_ls.root_dir(project_bufnr, function(root)
+		ts_root = root
+	end)
+	assert_equal(ts_root, lsp_root_dir, "ts_ls keeps nvim-lspconfig project root resolution")
+
+	local deno_bufnr = named_buffer(deno_dir .. "/fixture.ts", "typescript")
+	local deno_root_calls = 0
+	vim.lsp.config.ts_ls.root_dir(deno_bufnr, function()
+		deno_root_calls = deno_root_calls + 1
+	end)
+	assert_equal(deno_root_calls, 0, "ts_ls keeps nvim-lspconfig Deno exclusion")
+	vim.api.nvim_buf_delete(project_bufnr, { force = true })
+	vim.api.nvim_buf_delete(deno_bufnr, { force = true })
+
+	local lua_config = vim.lsp.config.lua_ls
+	local normal_root_calls = 0
+	lua_config.root_dir(general_exact, function()
+		normal_root_calls = normal_root_calls + 1
+	end)
+	assert_equal(normal_root_calls, 1, "normal-buffer native LSP gate")
+	for _, name in ipairs(require("revaz.lsp.servers").names()) do
+		local large_root_calls = 0
+		vim.lsp.config[name].root_dir(general_above, function()
+			large_root_calls = large_root_calls + 1
+		end)
+		assert_equal(large_root_calls, 0, "large-file native LSP gate for " .. name)
+	end
+
+	require("lazy").load({ plugins = { "none-ls", "nvim-cmp", "gitsigns.nvim" } })
+	local none_ls_should_attach = require("null-ls.config").get().should_attach
+	assert_equal(none_ls_should_attach(general_exact), true, "normal-buffer none-ls gate")
+	assert_equal(none_ls_should_attach(general_above), false, "large-file none-ls gate")
+
+	vim.api.nvim_set_current_buf(general_above)
+	assert_equal(require("cmp.config").get().enabled(), false, "large-file completion gate")
+	vim.api.nvim_set_current_buf(general_exact)
+	assert_equal(require("cmp.config").get().enabled(), true, "normal-buffer completion gate")
+
+	local gitsigns = require("gitsigns")
+	local gitsigns_config = require("gitsigns.config").config
+	assert_equal(gitsigns_config.auto_attach, false, "Gitsigns built-in automatic attachment")
+	assert_equal(gitsigns_config.on_attach(general_exact), true, "normal-buffer Gitsigns final veto")
+	assert_equal(gitsigns_config.on_attach(general_above), false, "large-file Gitsigns final veto")
+	local original_gitsigns_attach = gitsigns.attach
+	local gitsigns_calls = {}
+	gitsigns.attach = function(options)
+		table.insert(gitsigns_calls, options)
+	end
+	vim.api.nvim_exec_autocmds("BufWritePost", { group = "RevazGitsigns", buffer = general_above })
+	assert_equal(#gitsigns_calls, 0, "large-file Gitsigns gate")
+	vim.api.nvim_exec_autocmds("BufWritePost", { group = "RevazGitsigns", buffer = general_exact })
+	assert_equal(#gitsigns_calls, 1, "normal-buffer Gitsigns gate")
+	assert_equal(gitsigns_calls[1].bufnr, general_exact, "normal-buffer Gitsigns target")
+	gitsigns.attach = original_gitsigns_attach
+
+	local formatting = require("revaz.formatting")
+	local function formatting_autocmd_count(bufnr)
+		return #vim.api.nvim_get_autocmds({
+			group = "RevazAutoformat",
+			event = "BufWritePre",
+			buffer = bufnr,
+		})
+	end
+	formatting.attach(general_above)
+	assert_equal(formatting_autocmd_count(general_above), 0, "large-file automatic formatting gate")
+
+	vim.api.nvim_set_current_buf(fixtures.general_below.bufnr)
+	formatting.attach(fixtures.general_below.bufnr)
+	assert_equal(formatting_autocmd_count(fixtures.general_below.bufnr), 1, "normal-buffer automatic formatting")
+
+	local original_get_clients = vim.lsp.get_clients
+	local original_detach_client = vim.lsp.buf_detach_client
+	local original_gitsigns_detach = gitsigns.detach
+	local detached_clients = {}
+	local detached_gitsigns = {}
+	vim.lsp.get_clients = function(options)
+		if options.bufnr == fixtures.general_below.bufnr then
+			return { { id = 101, name = "lua_ls" }, { id = 102, name = "null-ls" } }
+		end
+		return original_get_clients(options)
+	end
+	vim.lsp.buf_detach_client = function(bufnr, client_id)
+		table.insert(detached_clients, { bufnr = bufnr, client_id = client_id })
+	end
+	gitsigns.detach = function(bufnr)
+		table.insert(detached_gitsigns, bufnr)
+	end
+	vim.cmd.BigFileForce()
+	vim.lsp.get_clients = original_get_clients
+	vim.lsp.buf_detach_client = original_detach_client
+	gitsigns.detach = original_gitsigns_detach
+
+	assert_equal(vim.b.bigfile, true, "forced large-file state")
+	assert_equal(vim.b.bigfile_override, "force", "forced override state")
+	assert_equal(vim.b.bigfile_reason, "forced by b:bigfile_override", "forced override reason")
+	assert_equal(formatting_autocmd_count(fixtures.general_below.bufnr), 0, "forced large-file formatting removal")
+	assert_equal(vim.treesitter.highlighter.active[fixtures.general_below.bufnr], nil, "forced Treesitter stop")
+	if vim.bo[fixtures.general_below.bufnr].indentexpr:find("nvim%-treesitter") then
+		fail("forced large-file mode retained Treesitter indent")
+	end
+	assert_equal(vim.diagnostic.is_enabled({ bufnr = fixtures.general_below.bufnr }), false, "forced diagnostics stop")
+	assert_equal(require("cmp.config").get().enabled(), false, "forced completion stop")
+	assert_equal(detached_clients, {
+		{ bufnr = fixtures.general_below.bufnr, client_id = 101 },
+		{ bufnr = fixtures.general_below.bufnr, client_id = 102 },
+	}, "forced native and none-ls client detachment")
+	assert_equal(detached_gitsigns, { fixtures.general_below.bufnr }, "forced Gitsigns detachment")
+
+	vim.cmd.BigFileDisable()
+	assert_equal(vim.b.bigfile, false, "disabled large-file state")
+	assert_equal(vim.b.bigfile_override, "disable", "disabled override state")
+	assert_equal(vim.b.bigfile_reason, "disabled by b:bigfile_override", "disabled override reason")
+	assert_equal(
+		vim.diagnostic.is_enabled({ bufnr = fixtures.general_below.bufnr }),
+		true,
+		"override diagnostics resume"
+	)
+	assert_equal(require("cmp.config").get().enabled(), true, "override completion resume")
+	assert_equal(
+		vim.treesitter.highlighter.active[fixtures.general_below.bufnr],
+		nil,
+		"override does not silently restart Treesitter"
+	)
+	assert_equal(
+		formatting_autocmd_count(fixtures.general_below.bufnr),
+		0,
+		"override does not silently restart formatting"
+	)
+
+	vim.cmd.BigFileAuto()
+	assert_equal(vim.b.bigfile, false, "automatic override restored state")
+	assert_equal(vim.b.bigfile_override, "auto", "automatic override value")
+
+	vim.diagnostic.enable(false, { bufnr = fixtures.general_below.bufnr })
+	vim.cmd.BigFileForce()
+	vim.cmd.BigFileDisable()
+	assert_equal(
+		vim.diagnostic.is_enabled({ bufnr = fixtures.general_below.bufnr }),
+		false,
+		"override preserves a pre-existing diagnostics opt-out"
+	)
+	vim.diagnostic.enable(true, { bufnr = fixtures.general_below.bufnr })
+
+	local race_dir = state_dir .. "/gitsigns-race"
+	vim.fn.delete(race_dir, "rf")
+	vim.fn.mkdir(race_dir, "p")
+	local function run_git(arguments, message)
+		local command = { "git", "-C", race_dir }
+		vim.list_extend(command, arguments)
+		local output = vim.fn.system(command)
+		if vim.v.shell_error ~= 0 then
+			fail(("%s: %s"):format(message, vim.trim(output)))
+		end
+	end
+	run_git({ "init", "--quiet" }, "could not initialize Gitsigns race fixture")
+	local race_path = race_dir .. "/tracked.lua"
+	vim.fn.writefile({ "return true" }, race_path)
+	run_git({ "add", "tracked.lua" }, "could not stage Gitsigns race fixture")
+
+	local reverse_modeline_path = race_dir .. "/reverse-modeline.md"
+	local reverse_modeline_size = bigfile.thresholds.markdown + 1
+	write_bytes(reverse_modeline_path, reverse_modeline_size, "-- vim: set ft=lua :\n")
+	run_git({ "add", "reverse-modeline.md" }, "could not stage reverse-modeline Gitsigns fixture")
+	vim.cmd.edit(vim.fn.fnameescape(reverse_modeline_path))
+	local reverse_modeline_bufnr = vim.api.nvim_get_current_buf()
+	assert_equal(vim.bo[reverse_modeline_bufnr].filetype, "lua", "reverse modeline final filetype")
+	assert_equal(vim.b[reverse_modeline_bufnr].bigfile, false, "reverse modeline final normal-size state")
+	assert_equal(vim.b[reverse_modeline_bufnr].bigfile_threshold_name, "general", "reverse modeline threshold")
+	if
+		not vim.wait(5000, function()
+			return require("gitsigns.cache").cache[reverse_modeline_bufnr] ~= nil
+		end, 10)
+	then
+		fail("Gitsigns did not attach after a modeline changed Markdown-large to generic-normal")
+	end
+	vim.api.nvim_buf_delete(reverse_modeline_bufnr, { force = true })
+
+	local race_bufnr = vim.api.nvim_create_buf(false, false)
+	vim.api.nvim_buf_set_lines(race_bufnr, 0, -1, false, { "return true" })
+	vim.bo[race_bufnr].filetype = "lua"
+
+	local original_on_attach_pre = gitsigns_config._on_attach_pre
+	local original_on_attach = gitsigns_config.on_attach
+	local continue_attach
+	local final_veto_calls = 0
+	gitsigns_config._on_attach_pre = function(bufnr, callback)
+		assert_equal(bufnr, race_bufnr, "in-flight Gitsigns target")
+		continue_attach = callback
+	end
+	gitsigns_config.on_attach = function(bufnr)
+		if bufnr == race_bufnr then
+			final_veto_calls = final_veto_calls + 1
+		end
+		return original_on_attach(bufnr)
+	end
+
+	-- Naming the loaded buffer triggers the configured asynchronous attachment.
+	vim.api.nvim_buf_set_name(race_bufnr, race_path)
+	vim.api.nvim_set_current_buf(race_bufnr)
+	if not vim.wait(5000, function()
+		return continue_attach ~= nil
+	end, 10) then
+		fail("Gitsigns did not reach its asynchronous pre-attach hook")
+	end
+
+	vim.cmd.BigFileForce()
+	continue_attach({})
+	if not vim.wait(5000, function()
+		return final_veto_calls == 1
+	end, 10) then
+		fail("Gitsigns in-flight attachment did not reach its final veto")
+	end
+	gitsigns_config._on_attach_pre = original_on_attach_pre
+	gitsigns_config.on_attach = original_on_attach
+	assert_equal(require("gitsigns.cache").cache[race_bufnr], nil, "Gitsigns in-flight final veto")
+	vim.cmd.BigFileDisable()
+	vim.api.nvim_buf_delete(race_bufnr, { force = true })
+
+	local treesitter_config = read_file(vim.env.DOTFILES_NVIM_SOURCE .. "/lua/revaz/plugins/treesitter.lua")
+	if treesitter_config:find("fs_stat", 1, true) or treesitter_config:find("200 * 1024", 1, true) then
+		fail("Treesitter retains duplicate Markdown size detection")
 	end
 end
 
@@ -514,7 +861,7 @@ local ok, result = xpcall(function()
 	local plugin_count = assert_locked_plugins()
 	assert_lsp_inventory()
 	assert_formatting_ownership()
-	assert_markdown_treesitter()
+	assert_bigfile_mode()
 	assert_health()
 	return plugin_count
 end, debug.traceback)

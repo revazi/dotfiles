@@ -37,7 +37,7 @@ return {
 
 		treesitter.install(parsers)
 
-		local max_markdown_filesize = 200 * 1024
+		local bigfile = require("revaz.bigfile")
 		local group = vim.api.nvim_create_augroup("TreesitterConfig", { clear = true })
 
 		vim.api.nvim_create_autocmd("FileType", {
@@ -68,18 +68,16 @@ return {
 			},
 			callback = function(args)
 				local bufnr = args.buf
-				local filetype = vim.bo[bufnr].filetype
-
-				if filetype == "markdown" or filetype == "pandoc" then
-					local ok, stats = pcall(vim.uv.fs_stat, vim.api.nvim_buf_get_name(bufnr))
-					if ok and stats and stats.size > max_markdown_filesize then
-						vim.treesitter.stop(bufnr)
-						return
-					end
+				if bigfile.is_active(bufnr) then
+					return
 				end
 
 				if pcall(vim.treesitter.start, bufnr) then
-					vim.bo[bufnr].indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+					local treesitter_indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+					if vim.bo[bufnr].indentexpr ~= treesitter_indentexpr then
+						vim.b[bufnr]._bigfile_saved_indentexpr = vim.bo[bufnr].indentexpr
+					end
+					vim.bo[bufnr].indentexpr = treesitter_indentexpr
 				end
 			end,
 		})
