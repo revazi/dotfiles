@@ -53,9 +53,16 @@ jobs:
           npx --yes @johnnymorganz/stylua-bin@2.6.0 --check
           config/nvim/init.lua
           config/nvim/lua/revaz/plugins-setup.lua
+          config/nvim/lua/revaz/preflight.lua
+          config/nvim/lua/revaz/health.lua
+          config/nvim/lua/revaz/telescope.lua
           config/nvim/lua/revaz/bigfile.lua
           config/nvim/lua/revaz/plugins/treesitter.lua
+          config/nvim/lua/revaz/plugins/telescope.lua
+          config/nvim/lua/revaz/plugins/copilot.lua
           config/nvim/lua/revaz/core/filetypes.lua
+          config/nvim/lua/revaz/core/keymaps.lua
+          config/nvim/lua/revaz/core/options.lua
           config/nvim/lua/revaz/formatting.lua
           config/nvim/lua/revaz/lsp/servers.lua
           config/nvim/lua/revaz/plugins/lspconfig.lua

@@ -1,5 +1,7 @@
 # Neovim config
 
+This configuration requires **Neovim 0.12.0 or newer**. Unsupported versions stop before plugin or editor setup and show one upgrade message.
+
 This directory is the canonical Neovim configuration for `revazi/dotfiles`.
 The `revazi/nvim-config-lua` repository is a published mirror, not a second
 source of truth. Make changes here, verify them from the dotfiles repository,
@@ -167,23 +169,44 @@ runs only the selected formatter.
 
 1. [folke/trouble.nvim](https://github.com/folke/trouble.nvim) - A pretty list for showing diagnostics, references, telescope results, quickfix and location lists to help you solve all the trouble your code is causing.
 
-## Installation
+## Installation and dependency health
 
-### Prerequisites
+After installing Neovim 0.12 or newer, run:
 
-#### [tree-sitter CLI](https://tree-sitter.github.io/tree-sitter/creating-parsers/1-getting-started.html#installation)
+```vim
+:ConfigHealth
+```
 
-Required by nvim-treesitter to install and update parsers:
+The report shows the Neovim version and each required or optional executable, including the affected feature and installation guidance. It is also available through `:checkhealth revaz`.
 
-`brew install tree-sitter-cli`
+### Required bootstrap/runtime prerequisite
 
-#### Telescope: [fd](https://github.com/sharkdp/fd)
+- **Git**: lazy.nvim bootstrap/plugin updates and Mason packages that use Git. If lazy.nvim and the needed tools are already installed, missing Git does not disable normal editing, but bootstrap/update operations cannot run.
 
-`brew install fd`
+### Optional feature prerequisites
 
-#### Telescope: [ripgrep](https://github.com/BurntSushi/ripgrep)
+Missing optional tools do not stop startup or unrelated editing:
 
-`brew install ripgrep`
+| Tool | Feature impact when missing |
+| --- | --- |
+| `tree-sitter` CLI 0.26.1+, `curl`, `tar`, and the compiler selected by `CC` (`cc` by default) | Parser installation and `:TSUpdate` are skipped when the toolchain is incomplete; already installed parsers remain usable. Install the CLI through a system package manager rather than npm, as recommended by nvim-treesitter. |
+| `curl` or GNU `wget`, plus GNU `tar`, `unzip`, and `gzip` | Mason package downloads or the matching archive extraction can fail; Mason reports failures per package, while its UI, installed tools, and packages that do not need the missing utility remain usable. |
+| `fd` | Telescope file search uses `find` when available. |
+| `rg` | Telescope live grep and grep-string mappings show focused installation guidance instead of failing. |
+| `make` and the compiler it invokes (`cc` by default, or an executable set in `CC`) | `telescope-fzf-native` is not built or loaded; Telescope keeps its Lua sorter. |
+| Node.js | Copilot is not loaded. |
+| Configured LSP server executables | Only language features from the missing server are unavailable. Mason can install the configured servers. |
+| Ruff, Prettier, Stylua, djLint, ansible-lint, dotenv-linter, EditorConfig Checker | Only the matching none-ls formatter/linter source is unavailable. |
+| Python 3 with `pynvim` | Python-provider plugins are unavailable; Python LSP and normal editing are unaffected. Neovim uses normal provider discovery rather than a machine-specific path. |
+
+For a concise macOS/Homebrew baseline, install only the tools for features you use, for example:
+
+```bash
+brew install neovim git tree-sitter-cli fd ripgrep node
+xcode-select --install # when make/compiler tools are not already available
+```
+
+Homebrew is only one installation route. Mason manages the configured LSP servers and none-ls tools, while system/project runtimes such as `ansible` may still need their normal package manager. Use `:ConfigHealth` for the exact current status rather than assuming every language tool is startup-required.
 
 ### Keymaps
 

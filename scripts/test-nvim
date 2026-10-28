@@ -54,6 +54,33 @@ git -C "$lazy_dir" fetch -q --depth=1 origin "$lazy_commit"
 git -C "$lazy_dir" checkout -q -B main FETCH_HEAD
 [[ $(git -C "$lazy_dir" rev-parse HEAD) == "$lazy_commit" ]] || fail "lazy.nvim checkout does not match lazy-lock.json"
 
+unsupported_log="$tmp_dir/unsupported.log"
+if ! nvim --headless \
+  --cmd 'lua vim.g.revaz_preflight_overrides = { version = { 0, 11, 9 } }' \
+  -c 'lua assert(package.loaded["revaz.bigfile"] == nil); assert(vim.fn.exists(":ConfigHealth") == 0); vim.cmd("qa!")' \
+  >"$unsupported_log" 2>&1; then
+  cat "$unsupported_log" >&2
+  fail "unsupported-version simulation failed"
+fi
+unsupported_message='This configuration requires Neovim 0.12.0 or newer (found 0.11.9). Upgrade Neovim, then restart; configuration loading was stopped.'
+[[ $(grep -Foc "$unsupported_message" "$unsupported_log") -eq 1 ]] || fail "unsupported version did not produce exactly one actionable guard message"
+if grep -Eiq 'module .* not found|stack traceback|plugin.*error' "$unsupported_log"; then
+  cat "$unsupported_log" >&2
+  fail "unsupported version produced cascading configuration errors"
+fi
+
+missing_git_data="$tmp_dir/missing-git/data"
+missing_git_log="$tmp_dir/missing-git.log"
+if ! XDG_DATA_HOME="$missing_git_data" nvim --headless \
+  --cmd 'lua vim.g.revaz_preflight_overrides = { executables = { git = false } }' \
+  -c 'lua assert(vim.fn.exists(":ConfigHealth") == 2); assert(package.loaded["revaz.core.options"] == nil); vim.cmd("ConfigHealth"); assert(vim.wait(10000, function() return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n"):find("Required bootstrap/runtime tools", 1, true) ~= nil end, 100)); vim.cmd("qa!")' \
+  >"$missing_git_log" 2>&1; then
+  cat "$missing_git_log" >&2
+  fail "missing-Git bootstrap simulation failed"
+fi
+grep -Fq 'lazy.nvim bootstrap skipped' "$missing_git_log" || fail "missing Git did not report the skipped lazy.nvim bootstrap"
+[[ ! -e "$missing_git_data/nvim/lazy/lazy.nvim" ]] || fail "lazy.nvim bootstrap was attempted without Git"
+
 printf 'Running isolated Neovim smoke tests (temporary data: %s)\n' "$tmp_dir"
 log_file="$tmp_dir/neovim.log"
 if ! nvim --headless -c "lua dofile([[$repo_root/scripts/nvim-smoke.lua]])" >"$log_file" 2>&1; then
