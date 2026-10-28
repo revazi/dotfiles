@@ -59,9 +59,13 @@ local function attached_formatting_client(bufnr, owner)
 	return selected
 end
 
-function M.attach(bufnr)
+function M.detach(bufnr)
 	vim.api.nvim_clear_autocmds({ group = group, buffer = bufnr })
-	if not M.owner(bufnr) then
+end
+
+function M.attach(bufnr)
+	M.detach(bufnr)
+	if require("revaz.bigfile").is_active(bufnr) or not M.owner(bufnr) then
 		return
 	end
 
@@ -70,7 +74,7 @@ function M.attach(bufnr)
 		buffer = bufnr,
 		desc = "Format with the explicit buffer owner",
 		callback = function()
-			if vim.b[bufnr].disable_autoformat then
+			if require("revaz.bigfile").is_active(bufnr) or vim.b[bufnr].disable_autoformat then
 				return
 			end
 

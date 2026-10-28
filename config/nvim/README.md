@@ -18,9 +18,9 @@ From the dotfiles repository root:
 
 The Neovim smoke test uses temporary `HOME` and XDG directories. It verifies
 lockfile-pinned plugins, unique primary plugin specs, the LSP/Mason inventory,
-startup, the removal of obsolete `typescript.nvim` configuration, Markdown
-Treesitter behavior around the 200 KiB limit, and relevant health checks without
-touching the normal Neovim installation or installing Mason tools.
+startup, formatting ownership, large-file boundaries and integration gates, and
+relevant health checks without touching the normal Neovim installation or
+installing Mason tools.
 
 ## Language servers
 
@@ -35,6 +35,37 @@ paths, or from a play containing `hosts:`. Mason installs
 `ansible-language-server`, but its required `ansible` executable must also be on
 `PATH`; install `ansible-core` with the system or Python package manager used on
 the machine.
+
+## Large-file mode
+
+Named files are evaluated from their on-disk byte size on `BufReadPre`, before
+lazy plugin event handlers, then re-evaluated on `FileType` and `BufWinEnter` so
+the final post-modeline filetype selects the threshold. Markdown and Pandoc keep
+the existing **larger than 200 KiB** threshold. Other filetypes use one
+conservative **larger than 1 MiB** threshold so ordinary source files retain
+their normal behavior. Exact threshold-sized files are not large. Unnamed
+buffers, new files that are not yet on disk, and smaller files remain normal.
+
+Large-file mode prevents Treesitter highlighting and indent, native LSP and
+none-ls attachment, diagnostics, nvim-cmp completion, gitsigns attachment, and
+automatic formatting. It does not change built-in syntax, filetype detection,
+swap or undo settings, or unrelated core editing options.
+
+Inspect the current buffer with:
+
+```vim
+:lua vim.print(vim.b.bigfile, vim.b.bigfile_reason, vim.b.bigfile_size, vim.b.bigfile_threshold, vim.b.bigfile_override)
+```
+
+The buffer-local `b:bigfile_override` is always `auto`, `force`, or `disable`.
+Use `:BigFileForce` to force large-file mode, `:BigFileDisable` to opt out, and
+`:BigFileAuto` to return to byte-size detection. Changing an override immediately
+stops or gates expensive integrations when mode becomes active. Opting out safely
+restores the buffer's prior diagnostics state and reopens the completion gate,
+but the override itself does not restart integrations already skipped or
+detached (including Treesitter, LSP/none-ls, gitsigns, and format-on-save).
+Reopen the buffer to restore their normal automatic startup; later ordinary
+plugin events may also reattach where that plugin normally does so.
 
 ## Formatting and linting ownership
 
