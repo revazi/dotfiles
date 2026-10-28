@@ -5,7 +5,7 @@ local function fail(message)
 end
 
 local function assert_equal(actual, expected, message)
-	if actual ~= expected then
+	if not vim.deep_equal(actual, expected) then
 		fail(("%s (expected %s, got %s)"):format(message, vim.inspect(expected), vim.inspect(actual)))
 	end
 end
@@ -47,6 +47,189 @@ local function assert_no_obsolete_typescript_config(config_root, lock, plugins)
 	end
 end
 
+local function plugin_source(spec)
+	if type(spec) == "string" then
+		return spec
+	end
+	if type(spec) == "table" and type(spec[1]) == "string" then
+		return spec[1]
+	end
+end
+
+local function assert_primary_plugin_specs(config_root)
+	local plugin_dir = config_root .. "/lua/revaz/plugins"
+	local owners = {}
+
+	for name, kind in vim.fs.dir(plugin_dir, { depth = math.huge }) do
+		if kind == "file" and name:match("%.lua$") then
+			local path = plugin_dir .. "/" .. name
+			local chunk, load_error = loadfile(path)
+			if not chunk then
+				fail(("could not load plugin spec %s: %s"):format(path, load_error))
+			end
+
+			local ok, specs = pcall(chunk)
+			if not ok then
+				fail(("could not evaluate plugin spec %s: %s"):format(path, specs))
+			end
+
+			local primary_specs = plugin_source(specs) and { specs } or specs
+			for _, spec in ipairs(primary_specs) do
+				local source = plugin_source(spec)
+				if source then
+					if owners[source] then
+						fail(
+							("plugin %s has duplicate primary specs in %s and %s"):format(source, owners[source], path)
+						)
+					end
+					owners[source] = path
+				end
+			end
+		end
+	end
+
+	for _, obsolete in ipairs({ "cmp.lua", "lsp.lua", "lsp/mason-config.lua" }) do
+		if vim.fn.filereadable(plugin_dir .. "/" .. obsolete) == 1 then
+			fail("obsolete aggregate plugin module still exists: " .. obsolete)
+		end
+	end
+end
+
+local function assert_lsp_inventory()
+	local inventory = require("revaz.lsp.servers")
+	local expected = {
+		"ansiblels",
+		"bashls",
+		"biome",
+		"cssls",
+		"dockerls",
+		"emmet_ls",
+		"eslint",
+		"html",
+		"lua_ls",
+		"marksman",
+		"pyright",
+		"ruff",
+		"tailwindcss",
+		"ts_ls",
+		"yamlls",
+	}
+	assert_equal(inventory.names(), expected, "configured LSP server inventory")
+	assert_equal(inventory.mason_names(), expected, "Mason-managed LSP server inventory")
+
+	for name, server in pairs(inventory.servers) do
+		if server.mason ~= true then
+			fail("configured LSP server is not Mason-managed: " .. name)
+		end
+		if type(server.cmd) ~= "table" or #server.cmd == 0 then
+			fail("configured LSP server has no explicit command: " .. name)
+		end
+		if type(server.filetypes) ~= "table" or #server.filetypes == 0 then
+			fail("configured LSP server has no supported filetypes: " .. name)
+		end
+	end
+
+	assert_equal(inventory.servers.ts_ls.filetypes, {
+		"javascript",
+		"javascriptreact",
+		"typescript",
+		"typescriptreact",
+	}, "ts_ls JavaScript and TypeScript filetypes")
+	assert_equal(inventory.servers.biome.cmd, { "biome", "lsp-proxy" }, "Biome command")
+	assert_equal(
+		inventory.servers.ansiblels.system_dependencies,
+		{ "ansible" },
+		"Ansible language server system dependencies"
+	)
+
+	local function detected_filetype(path, lines)
+		local bufnr = vim.api.nvim_create_buf(false, true)
+		vim.api.nvim_buf_set_name(bufnr, path)
+		vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines or {})
+		local filetype = vim.filetype.match({ filename = path, buf = bufnr })
+		vim.api.nvim_buf_delete(bufnr, { force = true })
+		return filetype
+	end
+
+	local ansible_dir = vim.fn.stdpath("state") .. "/ansible-smoke"
+	assert_equal(
+		detected_filetype(ansible_dir .. "/site.yml", { "---", "- name: Configure web", "  hosts: web" }),
+		"yaml.ansible",
+		"Ansible playbook content filetype"
+	)
+	assert_equal(
+		detected_filetype(ansible_dir .. "/roles/web/tasks/main.yml", { "---", "- name: Install package" }),
+		"yaml.ansible",
+		"Ansible role task filetype"
+	)
+	assert_equal(
+		detected_filetype(ansible_dir .. "/playbooks/deploy.yaml"),
+		"yaml.ansible",
+		"Ansible playbook path filetype"
+	)
+	assert_equal(detected_filetype(ansible_dir .. "/config.yml", { "enabled: true" }), "yaml", "generic YAML filetype")
+	assert_equal(
+		vim.filetype.match({ filename = ansible_dir .. "/filename-only.yml" }),
+		"yaml",
+		"generic YAML filename-only filetype"
+	)
+
+	local state_dir = vim.fn.stdpath("state") .. "/lsp-smoke"
+	local configured_dir = state_dir .. "/configured/src"
+	local configured_jsonc_dir = state_dir .. "/configured-jsonc/src"
+	local plain_dir = state_dir .. "/plain/src"
+	vim.fn.mkdir(configured_dir, "p")
+	vim.fn.mkdir(configured_jsonc_dir, "p")
+	vim.fn.mkdir(plain_dir, "p")
+	vim.fn.writefile({ "{}" }, state_dir .. "/configured/biome.json")
+	vim.fn.writefile({ "{}" }, state_dir .. "/configured-jsonc/biome.jsonc")
+	vim.fn.writefile({ "const configured = true" }, configured_dir .. "/configured.ts")
+	vim.fn.writefile({ "const configuredJsonc = true" }, configured_jsonc_dir .. "/configured.ts")
+	vim.fn.writefile({ "const plain = true" }, plain_dir .. "/plain.ts")
+
+	local function detected_root(path)
+		local root
+		inventory.servers.biome.root_dir(path, function(dir)
+			root = dir
+		end)
+		return root
+	end
+
+	assert_equal(
+		detected_root(configured_dir .. "/configured.ts"),
+		state_dir .. "/configured",
+		"Biome configured-project root"
+	)
+	assert_equal(
+		detected_root(configured_jsonc_dir .. "/configured.ts"),
+		state_dir .. "/configured-jsonc",
+		"Biome biome.jsonc project root"
+	)
+	assert_equal(
+		detected_root(plain_dir .. "/plain.ts"),
+		nil,
+		"Biome must not attach without biome.json or biome.jsonc"
+	)
+
+	require("lazy").load({ plugins = { "nvim-lspconfig" } })
+	for name, server in pairs(inventory.servers) do
+		local configured = vim.lsp.config[name]
+		if not configured then
+			fail("native LSP configuration was not registered: " .. name)
+		end
+		assert_equal(configured.cmd, server.cmd, "native LSP command for " .. name)
+		assert_equal(configured.filetypes, server.filetypes, "native LSP filetypes for " .. name)
+		if not vim.lsp.is_enabled(name) then
+			fail("native LSP configuration was not enabled: " .. name)
+		end
+	end
+
+	local mason_settings = require("mason-lspconfig.settings").current
+	assert_equal(mason_settings.automatic_enable, false, "mason-lspconfig automatic LSP activation")
+	assert_equal(mason_settings.ensure_installed, {}, "smoke-mode Mason LSP installs")
+	assert_equal(require("mason-null-ls.settings").current.ensure_installed, {}, "smoke-mode Mason none-ls installs")
+end
+
 local function assert_locked_plugins()
 	local config_root = vim.fn.stdpath("config")
 	local staged_lock = read_file(config_root .. "/lazy-lock.json")
@@ -81,6 +264,7 @@ local function assert_locked_plugins()
 	end
 
 	assert_no_obsolete_typescript_config(config_root, lock, plugins)
+	assert_primary_plugin_specs(config_root)
 	return locked_count
 end
 
@@ -150,6 +334,7 @@ local ok, result = xpcall(function()
 	)
 
 	local plugin_count = assert_locked_plugins()
+	assert_lsp_inventory()
 	assert_markdown_treesitter()
 	assert_health()
 	return plugin_count

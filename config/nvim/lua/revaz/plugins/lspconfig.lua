@@ -3,11 +3,10 @@ return {
 	event = { "BufReadPre", "BufNewFile" },
 	dependencies = {
 		"hrsh7th/cmp-nvim-lsp",
-		"nvimtools/none-ls.nvim",
 	},
 	config = function()
 		local cmp_nvim_lsp = require("cmp_nvim_lsp")
-
+		local server_inventory = require("revaz.lsp.servers")
 		local keymap = vim.keymap
 
 		local on_attach = function(client, bufnr)
@@ -67,7 +66,6 @@ return {
 			end, clients))
 		end, {})
 
-		-- Diagnostic signs
 		vim.diagnostic.config({
 			virtual_text = false,
 			underline = true,
@@ -83,105 +81,16 @@ return {
 			},
 		})
 
-		-- Helpers (Neovim-native root detection)
-		local function root_pattern(...)
-			local markers = { ... }
-			return function(bufname)
-				-- bufname can be nil sometimes; fall back to current buffer name
-				local name = bufname or vim.api.nvim_buf_get_name(0)
-				return vim.fs.root(name, markers)
-			end
+		for name, server in pairs(server_inventory.servers) do
+			local config = vim.deepcopy(server)
+			config.mason = nil
+			config.system_dependencies = nil
+			config.capabilities = capabilities
+			config.on_attach = on_attach
+			vim.lsp.config(name, config)
 		end
 
-		local servers = {
-			html = {},
-			cssls = {},
-			tailwindcss = {},
-			dockerls = {},
-			yamlls = {},
-			bashls = {},
-			marksman = {},
-
-			pyright = {
-				settings = {
-					pyright = {
-						disableOrganizeImports = true,
-					},
-					python = {
-						analysis = {
-							ignore = { "*" },
-						},
-					},
-				},
-			},
-
-			eslint = {
-				root_dir = root_pattern(
-					".eslintrc.js",
-					".eslintrc.cjs",
-					".eslintrc.json",
-					".eslintrc.yaml",
-					".eslintrc.yml"
-				),
-				settings = {
-					workingDirectory = { mode = "auto" },
-				},
-			},
-
-			biome = {
-				cmd = { "bunx", "biome", "lsp-proxy" },
-				root_markers = { "biome.json", "biome.jsonc" },
-			},
-
-			-- Ruff
-			ruff = {
-				settings = {
-					logLevel = "Debug",
-				},
-			},
-
-			lua_ls = {
-				settings = {
-					Lua = {
-						diagnostics = { globals = { "vim" } },
-						workspace = {
-							library = {
-								[vim.fn.expand("$VIMRUNTIME/lua")] = true,
-								[vim.fn.stdpath("config") .. "/lua"] = true,
-							},
-						},
-					},
-				},
-			},
-
-			emmet_ls = {
-				filetypes = {
-					"html",
-					"typescriptreact",
-					"javascriptreact",
-					"css",
-					"sass",
-					"scss",
-					"less",
-					"svelte",
-				},
-			},
-
-			-- TypeScript (typescript-language-server)
-			ts_ls = {
-				cmd = { "typescript-language-server", "--stdio" },
-				filetypes = { "typescript", "typescriptreact", "typescript.tsx" },
-				root_markers = { "tsconfig.json", "package.json", ".git" },
-			},
-		}
-
-		for name, cfg in pairs(servers) do
-			cfg.capabilities = capabilities
-			cfg.on_attach = on_attach
-
-			-- New API (Neovim 0.11+ + nvim-lspconfig new style)
-			vim.lsp.config(name, cfg)
-			vim.lsp.enable(name)
-		end
+		-- Native Neovim LSP configuration is the only server activation path.
+		vim.lsp.enable(server_inventory.names())
 	end,
 }

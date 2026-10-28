@@ -17,9 +17,24 @@ From the dotfiles repository root:
 ```
 
 The Neovim smoke test uses temporary `HOME` and XDG directories. It verifies
-lockfile-pinned plugins, startup, the removal of obsolete `typescript.nvim`
-configuration, Markdown Treesitter behavior around the 200 KiB limit, and
-relevant health checks without touching the normal Neovim installation.
+lockfile-pinned plugins, unique primary plugin specs, the LSP/Mason inventory,
+startup, the removal of obsolete `typescript.nvim` configuration, Markdown
+Treesitter behavior around the 200 KiB limit, and relevant health checks without
+touching the normal Neovim installation or installing Mason tools.
+
+## Language servers
+
+Mason manages the configured servers for Lua, Python, JavaScript, TypeScript,
+React, HTML, CSS, Tailwind, Emmet, YAML, Bash, Docker, Markdown, Ansible, ESLint,
+and Biome. Neovim's native `vim.lsp.config`/`vim.lsp.enable` setup is the only
+server activation path. Biome runs the Mason-provided `biome` executable and
+attaches only in projects containing `biome.json` or `biome.jsonc`.
+
+Ansible YAML is detected in common playbook, role, `group_vars`, and `host_vars`
+paths, or from a play containing `hosts:`. Mason installs
+`ansible-language-server`, but its required `ansible` executable must also be on
+`PATH`; install `ansible-core` with the system or Python package manager used on
+the machine.
 
 ## Plugins used
 
