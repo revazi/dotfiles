@@ -53,9 +53,11 @@ jobs:
           npx --yes @johnnymorganz/stylua-bin@2.6.0 --check
           config/nvim/lua/revaz/plugins-setup.lua
           config/nvim/lua/revaz/plugins/treesitter.lua
-          config/nvim/lua/revaz/plugins/lsp.lua
+          config/nvim/lua/revaz/core/filetypes.lua
+          config/nvim/lua/revaz/lsp/servers.lua
+          config/nvim/lua/revaz/plugins/lspconfig.lua
           config/nvim/lua/revaz/plugins/mason.lua
-          config/nvim/lua/revaz/plugins/lsp/mason-config.lua
+          config/nvim/lua/revaz/plugins/none-ls.lua
           scripts/nvim-smoke.lua
 
       - name: Test mirror synchronization safeguards
