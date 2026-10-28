@@ -821,8 +821,306 @@ local function assert_bigfile_mode()
 	end
 end
 
+local function assert_preflight(config_root)
+	local preflight = require("revaz.preflight")
+	assert_equal(preflight.meets_minimum({ major = 0, minor = 11, patch = 9 }), false, "Neovim minimum guard")
+	assert_equal(preflight.meets_minimum({ major = 0, minor = 12, patch = 0 }), true, "Neovim minimum acceptance")
+	if vim.fn.exists(":ConfigHealth") ~= 2 then
+		fail(":ConfigHealth was not registered")
+	end
+
+	local inventory = {}
+	for _, item in ipairs(preflight.inventory()) do
+		inventory[item.id] = item
+	end
+	assert_equal(inventory["lazy-git"].category, "required", "lazy.nvim Git dependency category")
+	assert_equal(inventory["treesitter-cli"].category, "optional", "Tree-sitter CLI dependency category")
+	assert_equal(inventory["copilot-node"].category, "optional", "Copilot Node dependency category")
+	if
+		not inventory["mason-download"]
+		or not inventory["mason-tar"]
+		or not inventory["mason-unzip"]
+		or not inventory["mason-gzip"]
+	then
+		fail("configuration dependency inventory does not cover Mason download and extraction tools")
+	end
+	if not inventory["lsp-ts_ls"] or not inventory["none-ls-prettier"] then
+		fail("configuration dependency inventory does not cover LSP and none-ls executables")
+	end
+
+	local options = read_file(config_root .. "/lua/revaz/core/options.lua")
+	if options:find("python3_host_prog", 1, true) or options:find("/Users/", 1, true) then
+		fail("core options retain a machine-specific Python provider path")
+	end
+
+	local original_overrides = vim.g.revaz_preflight_overrides
+	local original_notify = vim.notify
+	local notifications = {}
+	vim.notify = function(message)
+		table.insert(notifications, message)
+	end
+	local missing_executables = {
+		git = false,
+		["tree-sitter"] = false,
+		rg = false,
+		node = false,
+		fd = false,
+		fdfind = false,
+		find = true,
+		make = false,
+		curl = false,
+		wget = false,
+		tar = false,
+		gtar = false,
+		unzip = false,
+		gzip = false,
+		cc = false,
+		clang = false,
+		gcc = false,
+	}
+	vim.g.revaz_preflight_overrides = { executables = missing_executables }
+
+	assert_equal(preflight.feature_available("lazy"), false, "missing Git bootstrap gate")
+	assert_equal(preflight.feature_available("treesitter"), false, "missing Tree-sitter toolchain gate")
+	assert_equal(preflight.feature_available("telescope_files"), true, "Telescope find fallback")
+	assert_equal(preflight.feature_available("telescope_grep"), false, "missing ripgrep gate")
+	assert_equal(preflight.feature_available("fzf-native"), false, "missing native-build tool gate")
+	assert_equal(preflight.feature_available("copilot"), false, "missing Node Copilot gate")
+
+	vim.g.revaz_preflight_overrides = {
+		executables = { make = true, cc = false, clang = true },
+		environment = { CC = false },
+	}
+	assert_equal(preflight.feature_available("fzf-native"), false, "fzf-native requires make's default cc")
+	vim.g.revaz_preflight_overrides = {
+		executables = { make = true, cc = false, clang = true },
+		environment = { CC = "clang" },
+	}
+	assert_equal(preflight.feature_available("fzf-native"), true, "fzf-native honors an executable CC override")
+	vim.g.revaz_preflight_overrides = {
+		executables = { make = true, ccache = true, clang = false },
+		environment = { CC = "ccache clang" },
+	}
+	assert_equal(preflight.feature_available("fzf-native"), false, "fzf-native checks a wrapped compiler command")
+	vim.g.revaz_preflight_overrides = {
+		executables = { make = true, ccache = true, clang = true },
+		environment = { CC = "ccache clang" },
+	}
+	assert_equal(preflight.feature_available("fzf-native"), true, "fzf-native accepts an available wrapped compiler")
+	for _, compiler in ipairs({ "cl", "clang-cl" }) do
+		vim.g.revaz_preflight_overrides = {
+			executables = { make = true, [compiler] = true },
+			environment = { CC = compiler },
+		}
+		assert_equal(
+			preflight.feature_available("fzf-native"),
+			false,
+			"fzf-native rejects MSVC-style " .. compiler .. " on non-Windows"
+		)
+	end
+	vim.g.revaz_preflight_overrides = {
+		executables = { make = true, zig = true },
+		environment = { CC = "zig" },
+	}
+	assert_equal(preflight.feature_available("fzf-native"), false, "fzf-native rejects bare zig as a C compiler")
+	vim.g.revaz_preflight_overrides = {
+		executables = { make = true, zig = true },
+		environment = { CC = "zig cc" },
+	}
+	assert_equal(preflight.feature_available("fzf-native"), true, "fzf-native accepts zig's C compiler command")
+
+	local original_system = vim.system
+	local waited_for
+	vim.system = function()
+		return {
+			wait = function(_, timeout)
+				waited_for = timeout
+				return { code = 124, stdout = "", stderr = "" }
+			end,
+		}
+	end
+	package.loaded["revaz.preflight"] = nil
+	local bounded_preflight = require("revaz.preflight")
+	vim.g.revaz_preflight_overrides = {
+		executables = { ["tree-sitter"] = true, curl = true, tar = true, cc = true },
+	}
+	assert_equal(bounded_preflight.feature_available("treesitter"), false, "timed-out Tree-sitter version probe")
+	assert_equal(waited_for, bounded_preflight.version_probe_timeout_ms, "Tree-sitter version probe timeout")
+	package.loaded["revaz.preflight"] = preflight
+	vim.system = original_system
+
+	local treesitter = require("nvim-treesitter")
+	local install_calls = 0
+	package.loaded["nvim-treesitter"] = {
+		install = function()
+			install_calls = install_calls + 1
+		end,
+		indentexpr = treesitter.indentexpr,
+	}
+	local treesitter_spec = dofile(config_root .. "/lua/revaz/plugins/treesitter.lua")
+	local original_cmd = vim.cmd
+	local update_calls = 0
+	vim.cmd = function(command)
+		if command == "TSUpdate" then
+			update_calls = update_calls + 1
+		end
+	end
+
+	local treesitter_cases = {
+		{
+			name = "missing CLI",
+			executables = { ["tree-sitter"] = false, curl = true, tar = true, cc = true },
+			version = "0.27.0",
+		},
+		{
+			name = "outdated CLI",
+			executables = { ["tree-sitter"] = true, curl = true, tar = true, cc = true },
+			version = "0.25.0",
+		},
+		{
+			name = "missing curl",
+			executables = { ["tree-sitter"] = true, curl = false, tar = true, cc = true },
+			version = "0.27.0",
+		},
+		{
+			name = "missing tar",
+			executables = { ["tree-sitter"] = true, curl = true, tar = false, cc = true },
+			version = "0.27.0",
+		},
+		{
+			name = "missing compiler",
+			executables = {
+				["tree-sitter"] = true,
+				curl = true,
+				tar = true,
+				cc = false,
+				clang = false,
+				gcc = false,
+			},
+			version = "0.27.0",
+		},
+		{
+			name = "missing configured compiler",
+			executables = {
+				["tree-sitter"] = true,
+				curl = true,
+				tar = true,
+				cc = true,
+				["missing-compiler"] = false,
+			},
+			environment = { CC = "missing-compiler" },
+			version = "0.27.0",
+		},
+	}
+	for _, case in ipairs(treesitter_cases) do
+		vim.g.revaz_preflight_overrides = {
+			executables = case.executables,
+			environment = case.environment,
+			versions = { ["tree-sitter"] = case.version },
+		}
+		assert_equal(preflight.feature_available("treesitter"), false, "Tree-sitter gate: " .. case.name)
+		if case.name == "outdated CLI" then
+			local _, missing = preflight.status(preflight.find("treesitter-cli"))
+			if not table.concat(missing, ", "):find("0.26.1 or newer", 1, true) then
+				fail("outdated Tree-sitter CLI status omitted the minimum supported version")
+			end
+		end
+		treesitter_spec.build()
+		treesitter_spec.config()
+	end
+	vim.cmd = original_cmd
+	package.loaded["nvim-treesitter"] = treesitter
+	assert_equal(update_calls, 0, "Tree-sitter updates skipped with incomplete toolchains")
+	assert_equal(install_calls, 0, "Tree-sitter installs skipped with incomplete toolchains")
+	if
+		not vim.iter(notifications):any(function(message)
+			return message:find("Tree-sitter parser update skipped", 1, true) ~= nil
+				and message:find("tree-sitter CLI 0.26.1 or newer", 1, true) ~= nil
+		end)
+	then
+		fail("incomplete Tree-sitter toolchain did not produce one actionable parser report")
+	end
+
+	vim.g.revaz_preflight_overrides = { executables = missing_executables }
+
+	local telescope_calls = { find_files = 0, live_grep = 0 }
+	local original_builtin = package.loaded["telescope.builtin"]
+	package.loaded["telescope.builtin"] = {
+		find_files = function()
+			telescope_calls.find_files = telescope_calls.find_files + 1
+		end,
+		live_grep = function()
+			telescope_calls.live_grep = telescope_calls.live_grep + 1
+		end,
+	}
+	local telescope_helpers = require("revaz.telescope")
+	telescope_helpers.find_files()
+	telescope_helpers.live_grep()
+	package.loaded["telescope.builtin"] = original_builtin
+	assert_equal(telescope_calls.find_files, 1, "Telescope find fallback invocation")
+	assert_equal(telescope_calls.live_grep, 0, "Telescope live grep skipped without ripgrep")
+
+	local copilot_spec = dofile(config_root .. "/lua/revaz/plugins/copilot.lua")[1]
+	assert_equal(copilot_spec.cond(), false, "Copilot disabled without Node")
+	local telescope_spec = dofile(config_root .. "/lua/revaz/plugins/telescope.lua")
+	assert_equal(telescope_spec.dependencies[2].cond(), false, "fzf-native disabled without build tools")
+
+	vim.g.revaz_preflight_overrides = {
+		executables = { curl = true, wget = false, tar = true, unzip = false, gzip = true },
+	}
+	local original_smoke = vim.env.DOTFILES_NVIM_SMOKE
+	local original_mason = package.loaded["mason"]
+	local original_mason_lspconfig = package.loaded["mason-lspconfig"]
+	local original_mason_null_ls = package.loaded["mason-null-ls"]
+	local mason_lsp_opts
+	local mason_null_ls_opts
+	vim.env.DOTFILES_NVIM_SMOKE = "0"
+	package.loaded["mason"] = { setup = function() end }
+	package.loaded["mason-lspconfig"] = {
+		setup = function(opts)
+			mason_lsp_opts = opts
+		end,
+	}
+	package.loaded["mason-null-ls"] = {
+		setup = function(opts)
+			mason_null_ls_opts = opts
+		end,
+	}
+	local mason_spec = dofile(config_root .. "/lua/revaz/plugins/mason.lua")
+	assert_equal(mason_spec.build, ":MasonUpdate", "Mason registry update remains available")
+	mason_spec.config()
+	if #mason_lsp_opts.ensure_installed == 0 or #mason_null_ls_opts.ensure_installed == 0 then
+		fail("missing one archive utility broadly disabled automatic Mason installation")
+	end
+	package.loaded["mason"] = original_mason
+	package.loaded["mason-lspconfig"] = original_mason_lspconfig
+	package.loaded["mason-null-ls"] = original_mason_null_ls
+	vim.env.DOTFILES_NVIM_SMOKE = original_smoke
+	vim.g.revaz_preflight_overrides = { executables = missing_executables }
+
+	vim.notify = original_notify
+	vim.cmd("ConfigHealth")
+	local completed = vim.wait(30000, function()
+		local report = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
+		return report:find("Required bootstrap/runtime tools", 1, true) ~= nil
+			and report:find("Optional feature tools", 1, true) ~= nil
+	end, 100)
+	if not completed then
+		fail(":ConfigHealth did not complete under injected missing dependencies")
+	end
+	local report = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
+	for _, expected in ipairs({ "Neovim", "git", "tree-sitter CLI", "ripgrep", "Node.js", "impact:" }) do
+		if not report:find(expected, 1, true) then
+			fail(":ConfigHealth omitted expected dependency information: " .. expected)
+		end
+	end
+	vim.cmd("silent! bwipeout!")
+
+	vim.g.revaz_preflight_overrides = original_overrides
+end
+
 local function assert_health()
-	vim.cmd("checkhealth lazy nvim-treesitter")
+	vim.cmd("checkhealth lazy nvim-treesitter revaz")
 	local completed = vim.wait(30000, function()
 		local report = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
 		return report ~= "" and not report:find("Running healthchecks", 1, true)
@@ -862,6 +1160,7 @@ local ok, result = xpcall(function()
 	assert_lsp_inventory()
 	assert_formatting_ownership()
 	assert_bigfile_mode()
+	assert_preflight(source)
 	assert_health()
 	return plugin_count
 end, debug.traceback)

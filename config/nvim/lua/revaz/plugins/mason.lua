@@ -9,6 +9,7 @@ return {
 	},
 	config = function()
 		local server_inventory = require("revaz.lsp.servers")
+		local preflight = require("revaz.preflight")
 		local smoke = vim.env.DOTFILES_NVIM_SMOKE == "1"
 
 		require("mason").setup()
@@ -18,15 +19,7 @@ return {
 			automatic_enable = false,
 		})
 		require("mason-null-ls").setup({
-			ensure_installed = smoke and {} or {
-				"ansiblelint",
-				"djlint",
-				"dotenv_linter",
-				"editorconfig_checker",
-				"prettier",
-				"ruff",
-				"stylua",
-			},
+			ensure_installed = smoke and {} or preflight.none_ls_mason_names(),
 			automatic_installation = false,
 		})
 	end,

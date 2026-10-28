@@ -1,7 +1,14 @@
 return {
 	"nvim-treesitter/nvim-treesitter",
 	lazy = false,
-	build = ":TSUpdate",
+	build = function()
+		local preflight = require("revaz.preflight")
+		if not preflight.feature_available("treesitter") then
+			preflight.notify_missing("treesitter-cli", "Tree-sitter parser update skipped")
+			return
+		end
+		vim.cmd("TSUpdate")
+	end,
 	dependencies = {
 		{
 			"windwp/nvim-ts-autotag",
@@ -35,7 +42,12 @@ return {
 				"yaml",
 			}
 
-		treesitter.install(parsers)
+		local preflight = require("revaz.preflight")
+		if preflight.feature_available("treesitter") then
+			treesitter.install(parsers)
+		else
+			preflight.notify_missing("treesitter-cli", "Tree-sitter parser installation skipped")
+		end
 
 		local bigfile = require("revaz.bigfile")
 		local group = vim.api.nvim_create_augroup("TreesitterConfig", { clear = true })
