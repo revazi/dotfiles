@@ -6,32 +6,14 @@ return {
 	},
 	config = function()
 		local cmp_nvim_lsp = require("cmp_nvim_lsp")
+		local formatting = require("revaz.formatting")
 		local server_inventory = require("revaz.lsp.servers")
 		local keymap = vim.keymap
 
 		local on_attach = function(client, bufnr)
 			local opts = { noremap = true, silent = true, buffer = bufnr }
 
-			-- Patholux uses Biome for formatting, linting, and import organization.
-			if client.name == "biome" then
-				vim.api.nvim_create_autocmd("BufWritePre", {
-					group = vim.api.nvim_create_augroup("BiomeFormat", { clear = false }),
-					buffer = bufnr,
-					callback = function()
-						vim.lsp.buf.code_action({
-							context = { only = { "source.fixAll.biome", "source.organizeImports.biome" } },
-							apply = true,
-							bufnr = bufnr,
-						})
-						vim.lsp.buf.format({
-							filter = function(c)
-								return c.name == "biome"
-							end,
-							bufnr = bufnr,
-						})
-					end,
-				})
-			end
+			formatting.attach(bufnr)
 
 			-- ts_ls specific bindings
 			if client.name == "ts_ls" then
