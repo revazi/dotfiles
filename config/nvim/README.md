@@ -36,6 +36,51 @@ paths, or from a play containing `hosts:`. Mason installs
 `PATH`; install `ansible-core` with the system or Python package manager used on
 the machine.
 
+## Formatting and linting ownership
+
+Format-on-save is limited to the filetypes below. A buffer has one explicit
+owner: Biome in a configured Biome project, otherwise none-ls for a documented
+fallback. Other attached LSP servers are never selected automatically. Prettier
+prefers a project's `node_modules/.bin/prettier` before the Mason-installed
+fallback.
+
+| Workflow / filetype | Automatic formatting owner | Diagnostics and other language features |
+| --- | --- | --- |
+| Lua (`lua`) | none-ls / Stylua | `lua_ls` |
+| Python (`python`) | none-ls / Ruff format | Pyright and Ruff LSP diagnostics and manual fixes |
+| JavaScript, TypeScript, React variants | Biome when `biome.json`/`biome.jsonc` exists; otherwise none-ls / Prettier | `ts_ls`; ESLint LSP only in ESLint projects; Biome LSP in Biome projects |
+| HTML | Biome in Biome projects; otherwise none-ls / Prettier | HTML, Tailwind, and Emmet LSP features; none-ls diagnostics may also apply |
+| CSS | Biome in Biome projects; otherwise none-ls / Prettier | CSS, Tailwind, and Emmet LSP features |
+| SCSS and Less | none-ls / Prettier | CSS, Tailwind, and Emmet LSP features |
+| JSON and JSONC | Biome in Biome projects; otherwise none-ls / Prettier | Biome diagnostics only in Biome projects |
+| Generic YAML (`yaml`) | none-ls / Prettier | YAML LSP; none-ls diagnostics may also apply |
+| Ansible YAML (`yaml.ansible`) | None | Ansible LSP and none-ls `ansiblelint` diagnostics |
+| Markdown and MDX | none-ls / Prettier | Marksman |
+| Bash / shell | None | Bash LSP; none-ls diagnostics may apply where configured |
+| Dockerfile | None | Docker LSP |
+| Tailwind and Emmet projects | No separate formatter; ownership follows the underlying HTML/CSS/React filetype | Tailwind and Emmet provide LSP features only |
+| ESLint projects | No separate formatter; ownership follows the JavaScript/TypeScript row | ESLint provides LSP diagnostics and manual code actions, not save-time formatting |
+
+Biome owns only its configured filetypes (`css`, `html`, JavaScript, TypeScript,
+React variants, `json`, and `jsonc`). Lua and Python therefore keep their
+explicit none-ls fallback even inside a mixed-language Biome repository. All
+other filetypes, including Ansible YAML, Bash, shell, and Dockerfile, have no
+automatic formatter. none-ls diagnostics and LSP diagnostics are independent of
+formatting ownership and do not make a server an automatic formatter. none-ls
+remains the formatting/diagnostics integration; replacing it with another
+plugin is a separate decision.
+
+To disable automatic formatting for the current buffer:
+
+```vim
+:lua vim.b.disable_autoformat = true
+```
+
+Set the variable to `false` (or `nil`) to re-enable it. The override is
+buffer-local and does not affect other open files. Biome fix-all and import
+organization remain available as manual LSP code actions; save-time automation
+runs only the selected formatter.
+
 ## Plugins used
 
 ### Plugin manager

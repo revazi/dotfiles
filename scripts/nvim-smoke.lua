@@ -230,6 +230,184 @@ local function assert_lsp_inventory()
 	assert_equal(require("mason-null-ls.settings").current.ensure_installed, {}, "smoke-mode Mason none-ls installs")
 end
 
+local function assert_formatting_ownership()
+	local formatting = require("revaz.formatting")
+	local state_dir = vim.fn.stdpath("state") .. "/formatting-smoke"
+	local biome_dir = state_dir .. "/biome/src"
+	local plain_dir = state_dir .. "/plain/src"
+	vim.fn.mkdir(biome_dir, "p")
+	vim.fn.mkdir(plain_dir, "p")
+	vim.fn.writefile({ "{}" }, state_dir .. "/biome/biome.json")
+
+	local buffers = {}
+	local function buffer(path, filetype)
+		local bufnr = vim.api.nvim_create_buf(false, true)
+		vim.api.nvim_buf_set_name(bufnr, path)
+		vim.bo[bufnr].filetype = filetype
+		table.insert(buffers, bufnr)
+		return bufnr
+	end
+
+	local biome_typescript = buffer(biome_dir .. "/app.ts", "typescript")
+	local plain_typescript = buffer(plain_dir .. "/app.ts", "typescript")
+	local biome_python = buffer(biome_dir .. "/tool.py", "python")
+	local generic_yaml = buffer(plain_dir .. "/config.yml", "yaml")
+	local ansible_yaml = buffer(plain_dir .. "/playbook.yml", "yaml.ansible")
+	local bash = buffer(plain_dir .. "/script.sh", "bash")
+	local dockerfile = buffer(plain_dir .. "/Dockerfile", "dockerfile")
+
+	assert_equal(formatting.owner(biome_typescript), "biome", "Biome project formatting owner")
+	assert_equal(formatting.owner(plain_typescript), "null-ls", "TypeScript fallback formatting owner")
+	assert_equal(formatting.owner(biome_python), "null-ls", "mixed-project Python formatting owner")
+	assert_equal(formatting.owner(generic_yaml), "null-ls", "generic YAML formatting owner")
+	assert_equal(formatting.owner(ansible_yaml), nil, "Ansible YAML formatting owner")
+	assert_equal(formatting.owner(bash), nil, "Bash formatting owner")
+	assert_equal(formatting.owner(dockerfile), nil, "Dockerfile formatting owner")
+
+	local expected_prettier_filetypes = {
+		"css",
+		"html",
+		"javascript",
+		"javascriptreact",
+		"json",
+		"jsonc",
+		"less",
+		"markdown",
+		"markdown.mdx",
+		"scss",
+		"typescript",
+		"typescriptreact",
+		"yaml",
+	}
+	assert_equal(formatting.prettier_filetypes, expected_prettier_filetypes, "Prettier fallback filetypes")
+	for index, filetype in ipairs(expected_prettier_filetypes) do
+		local fallback = buffer(("%s/fallback-%d"):format(plain_dir, index), filetype)
+		assert_equal(formatting.owner(fallback), "null-ls", filetype .. " fallback formatting owner")
+	end
+	for index, filetype in ipairs(require("revaz.lsp.servers").servers.biome.filetypes) do
+		local biome = buffer(("%s/biome-%d"):format(biome_dir, index), filetype)
+		assert_equal(formatting.owner(biome), "biome", filetype .. " Biome formatting owner")
+	end
+
+	formatting.attach(plain_typescript)
+	formatting.attach(biome_typescript)
+	local function autocmd_count(bufnr)
+		return #vim.api.nvim_get_autocmds({
+			group = "RevazAutoformat",
+			event = "BufWritePre",
+			buffer = bufnr,
+		})
+	end
+	assert_equal(autocmd_count(plain_typescript), 1, "first buffer formatting callback")
+	assert_equal(autocmd_count(biome_typescript), 1, "second buffer formatting callback")
+
+	formatting.attach(biome_typescript)
+	formatting.attach(biome_typescript)
+	assert_equal(autocmd_count(plain_typescript), 1, "reattachment preserved the first buffer callback")
+	assert_equal(autocmd_count(biome_typescript), 1, "reattachment did not duplicate callbacks")
+
+	formatting.attach(bash)
+	assert_equal(autocmd_count(bash), 0, "unsupported filetype formatting callback")
+
+	local calls = {}
+	local notifications = {}
+	local attached_by_buffer = {}
+	local function client(id, name, supports_formatting)
+		return {
+			id = id,
+			name = name,
+			supports_method = function(_, method, requested_bufnr)
+				assert_equal(method, "textDocument/formatting", name .. " capability method")
+				assert_equal(requested_bufnr, vim.api.nvim_get_current_buf(), name .. " capability buffer context")
+				return supports_formatting
+			end,
+		}
+	end
+
+	local null_ls = client(1, "null-ls", true)
+	local duplicate_null_ls = client(2, "null-ls", true)
+	local unsupported_null_ls = client(3, "null-ls", false)
+	local biome = client(4, "biome", true)
+	local ts_ls = client(5, "ts_ls", true)
+	local original_format = vim.lsp.buf.format
+	local original_get_clients = vim.lsp.get_clients
+	local original_notify = vim.notify
+	local ok, err = xpcall(function()
+		vim.lsp.buf.format = function(options)
+			table.insert(calls, options)
+			return original_format(options)
+		end
+		vim.lsp.get_clients = function(options)
+			return attached_by_buffer[options.bufnr] or {}
+		end
+		vim.notify = function(...)
+			table.insert(notifications, { ... })
+		end
+
+		vim.api.nvim_set_current_buf(bash)
+		attached_by_buffer[plain_typescript] = { ts_ls }
+		attached_by_buffer[biome_typescript] = { null_ls, ts_ls }
+		vim.api.nvim_exec_autocmds("BufWritePre", { group = "RevazAutoformat", buffer = plain_typescript })
+		vim.api.nvim_exec_autocmds("BufWritePre", { group = "RevazAutoformat", buffer = biome_typescript })
+		assert_equal(#calls, 0, "unattached selected owners do not format")
+		assert_equal(#notifications, 0, "unattached selected owners stay quiet")
+
+		vim.lsp.buf.format = function(options)
+			assert_equal(vim.api.nvim_get_current_buf(), options.bufnr, "format invocation buffer context")
+			table.insert(calls, options)
+		end
+		attached_by_buffer[plain_typescript] = { unsupported_null_ls, ts_ls }
+		vim.api.nvim_exec_autocmds("BufWritePre", { group = "RevazAutoformat", buffer = plain_typescript })
+		assert_equal(#calls, 0, "selected owner without formatting support does not format")
+		assert_equal(#notifications, 0, "selected owner without formatting support stays quiet")
+
+		attached_by_buffer[plain_typescript] = { null_ls, duplicate_null_ls, ts_ls, biome }
+		attached_by_buffer[biome_typescript] = { biome, null_ls, ts_ls }
+		vim.api.nvim_exec_autocmds("BufWritePre", { group = "RevazAutoformat", buffer = plain_typescript })
+		assert_equal(#calls, 1, "fallback format invocation count")
+		assert_equal(calls[1].async, false, "fallback formatting is synchronous")
+		assert_equal(calls[1].bufnr, plain_typescript, "fallback format buffer")
+		assert_equal(calls[1].filter(null_ls), true, "fallback owner filter")
+		assert_equal(calls[1].filter(duplicate_null_ls), false, "fallback selects one exact owner client")
+		assert_equal(calls[1].filter(ts_ls), false, "arbitrary LSP fallback filter")
+		assert_equal(calls[1].filter(biome), false, "Biome excluded from fallback buffer")
+
+		vim.api.nvim_exec_autocmds("BufWritePre", { group = "RevazAutoformat", buffer = biome_typescript })
+		assert_equal(#calls, 2, "Biome format invocation count")
+		assert_equal(calls[2].async, false, "Biome formatting is synchronous")
+		assert_equal(calls[2].bufnr, biome_typescript, "Biome format buffer")
+		assert_equal(calls[2].filter(biome), true, "Biome owner filter")
+		assert_equal(calls[2].filter(null_ls), false, "none-ls excluded from Biome buffer")
+		assert_equal(calls[2].filter(ts_ls), false, "arbitrary LSP Biome filter")
+		assert_equal(#notifications, 0, "attached selected owners stay quiet")
+
+		vim.b[plain_typescript].disable_autoformat = true
+		vim.api.nvim_exec_autocmds("BufWritePre", { group = "RevazAutoformat", buffer = plain_typescript })
+		assert_equal(#calls, 2, "buffer-local formatting opt-out")
+		vim.b[plain_typescript].disable_autoformat = false
+		vim.api.nvim_exec_autocmds("BufWritePre", { group = "RevazAutoformat", buffer = plain_typescript })
+		assert_equal(#calls, 3, "buffer-local formatting opt-out re-enable")
+	end, debug.traceback)
+	vim.lsp.buf.format = original_format
+	vim.lsp.get_clients = original_get_clients
+	vim.notify = original_notify
+
+	for _, bufnr in ipairs(buffers) do
+		vim.api.nvim_buf_delete(bufnr, { force = true })
+	end
+	if not ok then
+		fail(err)
+	end
+
+	local none_ls_config = read_file(vim.env.DOTFILES_NVIM_SOURCE .. "/lua/revaz/plugins/none-ls.lua")
+	if none_ls_config:find("vim.notify", 1, true) then
+		fail("none-ls configuration contains routine notifications")
+	end
+	if none_ls_config:find("debug = true", 1, true) or none_ls_config:find('log_level = "debug"', 1, true) then
+		fail("none-ls debug logging is enabled")
+	end
+end
+
 local function assert_locked_plugins()
 	local config_root = vim.fn.stdpath("config")
 	local staged_lock = read_file(config_root .. "/lazy-lock.json")
@@ -335,6 +513,7 @@ local ok, result = xpcall(function()
 
 	local plugin_count = assert_locked_plugins()
 	assert_lsp_inventory()
+	assert_formatting_ownership()
 	assert_markdown_treesitter()
 	assert_health()
 	return plugin_count
